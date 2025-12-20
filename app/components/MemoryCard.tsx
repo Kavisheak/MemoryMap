@@ -10,6 +10,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../theme/ThemeProvider";
 
 type Props = {
   title: string;
@@ -45,6 +46,7 @@ export default memo(function MemoryCard({
   style,
 }: Props) {
   const formattedDate = formatDate(date);
+  const { colors } = useTheme();
 
   const getTypeIcon = () => {
     switch (memoryType) {
@@ -60,44 +62,49 @@ export default memo(function MemoryCard({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.container, style, pressed ? styles.pressed : null]}
+      style={({ pressed }) => [
+        styles.container,
+        { backgroundColor: colors.cardBackground, shadowColor: colors.textPrimary },
+        style,
+        pressed ? styles.pressed : null,
+      ]}
     >
       <View style={styles.imageContainer}>
         {imageUri ? (
           <Image source={{ uri: imageUri }} style={styles.image} />
         ) : (
-          <View style={styles.imagePlaceholder}>
-            <Ionicons name={getTypeIcon()} size={48} color="#cbd5e1" />
+          <View style={[styles.imagePlaceholder, { backgroundColor: colors.placeholder }]}>
+            <Ionicons name={getTypeIcon()} size={48} color={colors.separator} />
           </View>
         )}
 
-        <View style={styles.badge}>
+        <View style={[styles.badge, { backgroundColor: colors.badgeBg }]}>
           <Ionicons name={getTypeIcon()} size={16} color="#ffffff" />
         </View>
 
         {onDelete && (
-          <Pressable style={styles.deleteBtn} onPress={onDelete}>
+          <Pressable style={[styles.deleteBtn, { backgroundColor: colors.deleteBtnBg }]} onPress={onDelete}>
             <Ionicons name="close-circle" size={24} color="#ef4444" />
           </Pressable>
         )}
       </View>
 
       <View style={styles.content}>
-        <Text numberOfLines={2} style={styles.title}>
+        <Text numberOfLines={2} style={[styles.title, { color: colors.textPrimary }] }>
           {title}
         </Text>
 
-        {subtitle && <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text>}
+        {subtitle && <Text numberOfLines={1} style={[styles.subtitle, { color: colors.textSecondary }]}>{subtitle}</Text>}
 
         <View style={styles.metaRow}>
           {location && (
             <>
-              <Ionicons name="location" size={14} color="#64748b" />
-              <Text numberOfLines={1} style={styles.location}>{location}</Text>
+              <Ionicons name="location" size={14} color={colors.textSecondary} />
+              <Text numberOfLines={1} style={[styles.location, { color: colors.textSecondary }]}>{location}</Text>
             </>
           )}
-          {location && formattedDate && <Text style={styles.separator}>•</Text>}
-          {formattedDate && <Text style={styles.date}>{formattedDate}</Text>}
+          {location && formattedDate && <Text style={[styles.separator, { color: colors.separator }]}>•</Text>}
+          {formattedDate && <Text style={[styles.date, { color: colors.date }]}>{formattedDate}</Text>}
         </View>
       </View>
     </Pressable>
