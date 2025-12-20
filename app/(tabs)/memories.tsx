@@ -1,9 +1,21 @@
 import React from "react";
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import MemoryCard from "../components/MemoryCard";
+import { useTheme } from "../theme/ThemeProvider";
 
 export default function Memories() {
-  const demoMemories = [
+  const { colors } = useTheme();
+  type DemoMemory = {
+    id: string;
+    title: string;
+    subtitle?: string;
+    location?: string;
+    date: string;
+    imageUri?: string;
+    memoryType?: "photo" | "voice" | "note";
+  };
+
+  const demoMemories: DemoMemory[] = [
     {
       id: "1",
       title: "A Day at the Park",
@@ -47,8 +59,7 @@ export default function Memories() {
   ];
 
   return (
-    <SafeAreaView style={styles.safe}>
-     
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>    
 
       <ScrollView
         contentContainerStyle={styles.list}

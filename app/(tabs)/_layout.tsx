@@ -2,16 +2,18 @@ import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Tabs } from "expo-router";
 import { Platform, StyleSheet, View } from "react-native";
+import { useTheme } from "../theme/ThemeProvider";
 
 export default function TabsLayout() {
+  const { colors } = useTheme();
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#0ea5e9",
-        tabBarInactiveTintColor: "#94a3b8",
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: "#ffffff",
-          borderTopColor: "#e2e8f0",
+          backgroundColor: colors.cardBackground,
+          borderTopColor: colors.border,
           height: Platform.OS === "ios" ? 100 : 90,
           paddingBottom: Platform.OS === "ios" ? 4 : -4,
           paddingTop: 0,
@@ -21,6 +23,8 @@ export default function TabsLayout() {
           fontWeight: "600",
           marginBottom: -12,
         },
+        headerStyle: { backgroundColor: colors.cardBackground, borderBottomColor: colors.border },
+        headerTintColor: colors.textPrimary,
       }}
     >
       <Tabs.Screen
@@ -44,7 +48,8 @@ export default function TabsLayout() {
               <View
                 style={[
                   styles.centerIconCircle,
-                  focused && styles.centerIconCircleActive,
+                  { backgroundColor: colors.accent, shadowColor: colors.accent, borderColor: colors.cardBackground },
+                  focused && [styles.centerIconCircleActive, { backgroundColor: colors.accent }],
                 ]}
               >
                 <FontAwesome5
@@ -83,16 +88,13 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: "#0ea5e9",
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#0ea5e9",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
     elevation: 8,
     borderWidth: 4,
-    borderColor: "#ffffff",
   },
   centerIconCircleActive: {
     backgroundColor: "#0284c7",
