@@ -1,5 +1,5 @@
 import React from "react";
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ImageBackground, SafeAreaView, ScrollView, StyleSheet } from "react-native";
 import MemoryCard from "../components/MemoryCard";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -59,7 +59,12 @@ export default function Memories() {
   ];
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>    
+    <SafeAreaView style={[styles.safe, { backgroundColor: "transparent" }]}>
+      <ImageBackground
+        source={require("../../assets/images/memory-card-bg.jpg")}
+        style={{ position: "absolute", width: "100%", height: "100%" }}
+        resizeMode="cover"
+      />
 
       <ScrollView
         contentContainerStyle={styles.list}
