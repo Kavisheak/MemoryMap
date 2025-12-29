@@ -1,4 +1,6 @@
-import { router, useLocalSearchParams } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { ResizeMode, Video } from "expo-av";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
 import { Dimensions, FlatList, Image, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
@@ -8,7 +10,7 @@ const ITEM_W = W;
 const CARD_W = W - 32;
 const MEDIA_H = Math.round(CARD_W * 0.78);
 
-type MediaItem = { kind: "image"; uri: string };
+type MediaItem = { kind: "image" | "video"; uri: string };
 type SampleMemory = {
   id: string;
   title: string;
@@ -16,22 +18,25 @@ type SampleMemory = {
   date: string;
   description: string;
   media: MediaItem[];
+  latitude?: number;
+  longitude?: number;
 };
 
 const SAMPLE: SampleMemory = {
   id: "1",
-  title: "A Day at the Park",
-  location: "Central Park",
-  date: "2024-04-15",
+  title: "Weekend Getaway",
+  location: "Ella, Sri Lanka",
+  date: "2024-05-20",
   description:
-    "A calm afternoon: long walk, fresh air, snacks on the grass, and golden hour. Swipe through the photos (demo).",
+    "We started the day with a hike up Little Adam's Peak, enjoying the breathtaking sunrise. Later, we visited the Nine Arches Bridge and watched the train pass by. The evening was spent relaxing at a cozy cafe with live music.",
   media: [
-    { kind: "image", uri: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1400&auto=format&fit=crop&q=60" },
-    { kind: "image", uri: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1400&auto=format&fit=crop&q=60" },
-    { kind: "image", uri: "https://images.unsplash.com/photo-1477511801984-4ad318ed9846?w=1400&auto=format&fit=crop&q=60" },
-    { kind: "image", uri: "https://images.unsplash.com/photo-1523413457543-1e5e8a6d2fb1?w=1400&auto=format&fit=crop&q=60" },
-    { kind: "image", uri: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1400&auto=format&fit=crop&q=60" },
+    { kind: "image", uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1400&auto=format&fit=crop&q=60" },
+    { kind: "video", uri: "https://www.w3schools.com/html/mov_bbb.mp4" },
+    { kind: "image", uri: "https://images.unsplash.com/photo-1628628045151-24b8686a603c?w=1400&auto=format&fit=crop&q=60" },
+    { kind: "image", uri: "https://images.unsplash.com/photo-1620619767323-b95a89183081?w=1400&auto=format&fit=crop&q=60" },
   ],
+  latitude: 6.8667,
+  longitude: 81.0467,
 };
 
 export default function MemorySwipeDetails() {
@@ -53,7 +58,9 @@ export default function MemorySwipeDetails() {
           location: parsed.latitude ? "Lat: " + parsed.latitude.toFixed(4) : "Unknown Loc",
           date: parsed.date,
           description: parsed.description || parsed.note || "No details provided.",
-          media: parsed.media || (parsed.imageUri ? [{ uri: parsed.imageUri, type: "image" }] : []),
+          media: parsed.media || (parsed.imageUri ? [{ uri: parsed.imageUri, type: "image", kind: "image" }] : []),
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
         };
       } catch (e) {
         console.log("Error parsing memory data", e);
@@ -67,21 +74,16 @@ export default function MemorySwipeDetails() {
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: colors.background }]}>
+      <Stack.Screen
+        options={{
+          title: mem.title || "Memory",
+          headerStyle: { backgroundColor: colors.cardBackground },
+          headerTintColor: colors.textPrimary,
+          headerShadowVisible: false,
+          headerTitleStyle: { fontWeight: "800" },
+        }}
+      />
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[s.backBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-        >
-          <Text style={{ fontSize: 24, paddingBottom: 2, color: colors.textPrimary }}>‹</Text>
-        </TouchableOpacity>
-        <Text numberOfLines={1} style={[s.headerTitle, { color: colors.textPrimary }]}>
-          {mem.title}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
 
       <View style={{ flex: 1 }}>
         {/* Carousel */}
@@ -100,7 +102,7 @@ export default function MemorySwipeDetails() {
               setIndex(next);
             }}
             getItemLayout={(_, i) => ({ length: ITEM_W, offset: ITEM_W * i, index: i })}
-            renderItem={({ item }) => (
+            renderItem={({ item, index: i }) => (
               <View style={{ width: ITEM_W, paddingHorizontal: 16 }}>
                 <View
                   style={[
@@ -112,14 +114,25 @@ export default function MemorySwipeDetails() {
                     },
                   ]}
                 >
-                  <Image source={{ uri: item.uri }} style={s.mediaImg} />
+                  {(item.kind === "video" || item.type === "video") ? (
+                    <Video
+                      source={{ uri: item.uri }}
+                      style={s.mediaImg}
+                      useNativeControls
+                      shouldPlay={index === i}
+                      isLooping
+                      resizeMode={ResizeMode.COVER}
+                    />
+                  ) : (
+                    <Image source={{ uri: item.uri }} style={s.mediaImg} />
+                  )}
                   <View style={s.overlay}>
                     <Text style={[s.overlayText, { color: "#fff" }]}>
                       {mem.location} • {mem.date}
                     </Text>
                     <View style={s.counterBadge}>
                       <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>
-                        {index + 1}/{mem.media.length}
+                        {i + 1}/{mem.media.length}
                       </Text>
                     </View>
                   </View>
@@ -127,6 +140,34 @@ export default function MemorySwipeDetails() {
               </View>
             )}
           />
+
+          {/* Prev Button */}
+          {index > 0 && (
+            <TouchableOpacity
+              style={[s.navBtn, { left: 24 }]}
+              onPress={() => {
+                const nextIndex = index - 1;
+                listRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+                setIndex(nextIndex);
+              }}
+            >
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+          )}
+
+          {/* Next Button */}
+          {index < mem.media.length - 1 && (
+            <TouchableOpacity
+              style={[s.navBtn, { right: 24 }]}
+              onPress={() => {
+                const nextIndex = index + 1;
+                listRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+                setIndex(nextIndex);
+              }}
+            >
+              <Ionicons name="chevron-forward" size={24} color="#fff" />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Dots */}
@@ -151,6 +192,31 @@ export default function MemorySwipeDetails() {
             <Text style={[s.sectionTitle, { color: colors.textSecondary }]}>MEMORY DETAILS</Text>
             <Text style={[s.bodyText, { color: colors.textPrimary }]}>{mem.description}</Text>
           </View>
+
+          {/* See in Map Button */}
+          {mem.latitude && mem.longitude ? (
+             <TouchableOpacity
+             activeOpacity={0.8}
+             onPress={() => {
+               // Navigate to map tab with focus params
+               router.navigate({ pathname: "/(tabs)", params: { focusLat: mem.latitude, focusLng: mem.longitude } });
+             }}
+             style={{
+               marginTop: 20,
+               backgroundColor: colors.accent,
+               paddingVertical: 16,
+               borderRadius: 16,
+               alignItems: "center",
+               shadowColor: colors.accent,
+               shadowOffset: { width: 0, height: 4 },
+               shadowOpacity: 0.3,
+               shadowRadius: 10,
+               elevation: 6,
+             }}
+           >
+             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>See in Map</Text>
+           </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     </SafeAreaView>
@@ -236,5 +302,16 @@ const s = StyleSheet.create({
     fontSize: 15,
     lineHeight: 24,
     fontWeight: "500",
+  },
+  navBtn: {
+    position: "absolute",
+    top: MEDIA_H / 2 - 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
   },
 });

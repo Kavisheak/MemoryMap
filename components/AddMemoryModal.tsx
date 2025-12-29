@@ -183,6 +183,16 @@ export default function AddMemoryModal({
               </View>
 
               {/* Description */}
+              <Text style={[s.label, { color: c.sub }]}>DESCRIPTION</Text>
+              <TextInput
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Short description..."
+                placeholderTextColor={c.sub}
+                style={[s.input, { backgroundColor: c.surface, borderColor: c.border, color: c.text }]}
+              />
+
+              {/* Description */}
               {/* Unified Media Section */}
               <View style={{ marginTop: 24 }}>
                 <View style={[s.sectionHeaderRow, { marginBottom: 12 }]}>

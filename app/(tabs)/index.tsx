@@ -1,17 +1,17 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { router } from "expo-router"; // Import router
+import { router, useLocalSearchParams } from "expo-router"; // Import router and params
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Button,
-  FlatList,
-  Image,
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Button,
+    FlatList,
+    Image,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { WebView } from "react-native-webview";
@@ -46,6 +46,7 @@ type Memory = {
 
 export default function Index() {
   const { colors } = useTheme();
+  const params = useLocalSearchParams<{ focusLat?: string; focusLng?: string }>();
 
   const [memories, setMemories] = useState<Memory[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -92,6 +93,18 @@ export default function Index() {
   } catch (e) {
     AsyncStorage = null;
   }
+
+  // Handle focus params
+  useEffect(() => {
+    if (params.focusLat && params.focusLng) {
+      const lat = parseFloat(params.focusLat);
+      const lng = parseFloat(params.focusLng);
+      // delay slightly to allow map to load if cold start
+      setTimeout(() => {
+        panTo(lat, lng, 16);
+      }, 1000);
+    }
+  }, [params.focusLat, params.focusLng]);
 
   useEffect(() => {
     async function requestPerms() {
