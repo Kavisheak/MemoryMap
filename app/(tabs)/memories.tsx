@@ -1,6 +1,6 @@
-import React from "react";
-import { SafeAreaView, ScrollView, StyleSheet } from "react-native";
 import { router } from "expo-router";
+import React, { useMemo, useState } from "react";
+import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import MemoryCard from "../../components/MemoryCard";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -60,10 +60,72 @@ export default function Memories() {
     },
   ];
 
+  const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "title">("date-desc");
+
+  const sortedMemories = useMemo(() => {
+    const sorted = [...demoMemories];
+    if (sortBy === "date-desc") {
+      return sorted.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    } else if (sortBy === "date-asc") {
+      return sorted.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } else if (sortBy === "title") {
+      return sorted.sort((a, b) => a.title.localeCompare(b.title));
+    }
+    return sorted;
+  }, [sortBy]);
+
+  const handleDelete = (id: string, title: string) => {
+    Alert.alert(
+      "Delete Memory",
+      `Are you sure you want to delete "${title}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: () => console.log("Deleted:", id) 
+        }
+      ]
+    );
+  };
+
+  const SortChip = ({ label, value }: { label: string; value: typeof sortBy }) => {
+    const isActive = sortBy === value;
+    return (
+      <TouchableOpacity
+        onPress={() => setSortBy(value)}
+        style={[
+          styles.chip,
+          {
+            backgroundColor: isActive ? colors.accent : colors.surface,
+            borderColor: isActive ? colors.accent : colors.border,
+            borderWidth: 1,
+          },
+        ]}
+      >
+        <Text
+          style={{
+            color: isActive ? "#fff" : colors.textSecondary,
+            fontSize: 13,
+            fontWeight: isActive ? "700" : "500",
+          }}
+        >
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <View style={[styles.headerContainer, { borderBottomColor: colors.border }]}>
+         <SortChip label="Newest" value="date-desc" />
+         <SortChip label="Oldest" value="date-asc" />
+         <SortChip label="A-Z" value="title" />
+      </View>
+
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {demoMemories.map((m) => (
+        {sortedMemories.map((m) => (
           <MemoryCard
             key={m.id}
             title={m.title}
@@ -73,11 +135,10 @@ export default function Memories() {
             imageUri={m.imageUri}
             memoryType={m.memoryType}
             onPress={() => {
-              // ✅ Only the first memory opens the swipe preview for now
-              if (m.id === "1") router.push(`/memory/${m.id}`);
-              else console.log("Pressed:", m.id);
+              // Pass data so detail view has coords if available
+              router.push({ pathname: `/memory/${m.id}`, params: { data: JSON.stringify(m) } });
             }}
-            onDelete={() => console.log("Delete:", m.id)}
+            onDelete={() => handleDelete(m.id, m.title)}
           />
         ))}
       </ScrollView>
@@ -87,5 +148,17 @@ export default function Memories() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  headerContainer: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    borderBottomWidth: 1,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
   list: { padding: 16, paddingBottom: 24 },
 });

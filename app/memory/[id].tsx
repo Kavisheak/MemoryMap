@@ -1,6 +1,6 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
-import { Dimensions, FlatList, Image, SafeAreaView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Dimensions, FlatList, Image, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 
 const { width: W } = Dimensions.get("window");
@@ -16,6 +16,8 @@ type SampleMemory = {
   date: string;
   description: string;
   media: MediaItem[];
+  latitude?: number;
+  longitude?: number;
 };
 
 const SAMPLE: SampleMemory = {
@@ -32,6 +34,8 @@ const SAMPLE: SampleMemory = {
     { kind: "image", uri: "https://images.unsplash.com/photo-1523413457543-1e5e8a6d2fb1?w=1400&auto=format&fit=crop&q=60" },
     { kind: "image", uri: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1400&auto=format&fit=crop&q=60" },
   ],
+  latitude: 40.785091,
+  longitude: -73.968285,
 };
 
 export default function MemorySwipeDetails() {
@@ -42,7 +46,7 @@ export default function MemorySwipeDetails() {
   const listRef = React.useRef<FlatList<any> | null>(null);
   const [index, setIndex] = React.useState(0);
 
-  const mem = useMemo<any | null>(() => {
+  const mem = useMemo<SampleMemory | null>(() => {
     if (data) {
       try {
         const parsed = JSON.parse(data);
@@ -53,7 +57,9 @@ export default function MemorySwipeDetails() {
           location: parsed.latitude ? "Lat: " + parsed.latitude.toFixed(4) : "Unknown Loc",
           date: parsed.date,
           description: parsed.description || parsed.note || "No details provided.",
-          media: parsed.media || (parsed.imageUri ? [{ uri: parsed.imageUri, type: "image" }] : []),
+          media: parsed.media || (parsed.imageUri ? [{ uri: parsed.imageUri, type: "image", kind: "image" }] : []),
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
         };
       } catch (e) {
         console.log("Error parsing memory data", e);
@@ -67,21 +73,16 @@ export default function MemorySwipeDetails() {
 
   return (
     <SafeAreaView style={[s.safe, { backgroundColor: colors.background }]}>
+      <Stack.Screen
+        options={{
+          title: mem.title || "Memory",
+          headerStyle: { backgroundColor: colors.cardBackground },
+          headerTintColor: colors.textPrimary,
+          headerShadowVisible: false,
+          headerTitleStyle: { fontWeight: "800" },
+        }}
+      />
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[s.backBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-        >
-          <Text style={{ fontSize: 24, paddingBottom: 2, color: colors.textPrimary }}>‹</Text>
-        </TouchableOpacity>
-        <Text numberOfLines={1} style={[s.headerTitle, { color: colors.textPrimary }]}>
-          {mem.title}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
 
       <View style={{ flex: 1 }}>
         {/* Carousel */}
@@ -145,13 +146,40 @@ export default function MemorySwipeDetails() {
           ))}
         </View>
 
-        {/* Description */}
-        <View style={{ padding: 20 }}>
+        {/* Description & Button */}
+        <ScrollView contentContainerStyle={{ padding: 20 }}>
           <View style={[s.detailsCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
             <Text style={[s.sectionTitle, { color: colors.textSecondary }]}>MEMORY DETAILS</Text>
             <Text style={[s.bodyText, { color: colors.textPrimary }]}>{mem.description}</Text>
           </View>
-        </View>
+
+          {/* See in Map Button */}
+          {mem.latitude && mem.longitude ? (
+             <TouchableOpacity
+             activeOpacity={0.8}
+             onPress={() => {
+               // Must replace to ensure params are picked up if we are already in stack
+               // But passing to a TAB is tricky.
+               // We will push to layout or replace.
+               router.navigate({ pathname: "/(tabs)", params: { focusLat: mem.latitude, focusLng: mem.longitude } });
+             }}
+             style={{
+               marginTop: 20,
+               backgroundColor: colors.accent,
+               paddingVertical: 16,
+               borderRadius: 16,
+               alignItems: "center",
+               shadowColor: colors.accent,
+               shadowOffset: { width: 0, height: 4 },
+               shadowOpacity: 0.3,
+               shadowRadius: 10,
+               elevation: 6,
+             }}
+           >
+             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>See in Map</Text>
+           </TouchableOpacity>
+          ) : null}
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
