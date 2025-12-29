@@ -34,6 +34,8 @@ type Memory = {
   imageUris?: string[];
   videoUris?: string[];
 
+  media?: { uri: string; type: string }[];
+
   note?: string;
   title?: string;
   description?: string;
@@ -166,26 +168,102 @@ export default function Index() {
     setMediaItems([]);
   };
 
+  // hardcoded samples for demo
+  const SAMPLE_MEMORIES: Memory[] = [
+    {
+      id: "1",
+      title: "Sunrise at Ella Rock",
+      description: "A breathtaking view after a long hike up the mountain.",
+      date: "2024-05-20",
+      type: "image",
+      imageUri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200",
+      latitude: 6.8667,
+      longitude: 81.0467,
+      createdAt: Date.now(),
+      media: [
+         { uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200", type: "image" },
+         { uri: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200", type: "image" },
+         { uri: "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1200", type: "image" },
+      ]
+    },
+    {
+      id: "2",
+      title: "Surfing in Mirissa",
+      description: "Caught some amazing waves this morning!",
+      date: "2024-05-22",
+      type: "video",
+      videoUri: "https://vjs.zencdn.net/v/oceans.mp4",
+      imageUri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", // thumb
+      latitude: 5.9482,
+      longitude: 80.4716,
+      createdAt: Date.now(),
+      media: [
+         { uri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", type: "image" },
+         { uri: "https://vjs.zencdn.net/v/oceans.mp4", type: "video" }
+      ]
+    },
+    {
+      id: "3",
+      title: "Galle Fort Walk",
+      description: "Walking through history in the colonial fortress.",
+      date: "2024-05-25",
+      type: "image",
+      imageUri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200",
+      latitude: 6.0329,
+      longitude: 80.2168,
+      createdAt: Date.now(),
+      media: [
+        { uri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200", type: "image" },
+        { uri: "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200", type: "image" },
+        { uri: "https://images.unsplash.com/photo-1523490792147-38e4a9e1443b?w=1200", type: "image" }
+      ]
+    },
+    {
+      id: "4",
+      title: "Notes on Architecture",
+      description: "Observing the Dutch colonial style buildings.",
+      date: "2024-05-26",
+      type: "note",
+      note: "Colonial style notes...",
+      latitude: 6.0535,
+      longitude: 80.2210,
+      createdAt: Date.now(),
+      media: []
+    },
+  ];
+
   // load saved memories
   useEffect(() => {
     async function load() {
-      if (!AsyncStorage || !AsyncStorage.getItem) return;
-      try {
-        const raw = await AsyncStorage.getItem("@memories_v1");
-        if (raw) {
-          const parsed: Memory[] = JSON.parse(raw);
-          setMemories(parsed);
+      // If we have local storage logic, we can try it. 
+      // For now, let's merge samples so they ALWAYS show for the demo.
+      let loaded: Memory[] = [];
+      if (AsyncStorage && AsyncStorage.getItem) {
+        try {
+          const raw = await AsyncStorage.getItem("@memories_v1");
+          if (raw) {
+            loaded = JSON.parse(raw);
+          }
+        } catch (e) {}
+      }
+      
+      // Merge: include samples if not present properly
+      const combined = [...SAMPLE_MEMORIES];
+      loaded.forEach(m => {
+        // avoid dupe IDs from samples
+        if(!combined.find(x => x.id === m.id)) combined.push(m);
+      });
 
-          setTimeout(() => {
-            parsed.forEach((m) => {
-              try {
-                postToWeb({ type: "addMarker", marker: m });
-              } catch (e) {}
-            });
-            initialSyncRef.current = true;
-          }, 350);
-        }
-      } catch (e) {}
+      setMemories(combined);
+
+      setTimeout(() => {
+        combined.forEach((m) => {
+          try {
+            postToWeb({ type: "addMarker", marker: m });
+          } catch (e) {}
+        });
+        initialSyncRef.current = true;
+      }, 350);
     }
     load();
   }, []);
@@ -362,16 +440,17 @@ export default function Index() {
   }, [memories]);
 
   useEffect(() => {
-    if (!selectedCoord) {
+    const coord = selectedCoord;
+    if (!coord) {
       setSelectedLocationName(null);
       setLocationFetching(false);
       return;
     }
     let mounted = true;
-    async function fetchName() {
+    async function fetchName(lat: number, lon: number) {
       setLocationFetching(true);
       try {
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${selectedCoord.latitude}&lon=${selectedCoord.longitude}&zoom=18&addressdetails=1`;
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
         const resp = await fetch(url, { headers: { "User-Agent": "MemoryMap/1.0 (example@local)" } });
         const json = await resp.json();
         if (!mounted) return;
@@ -384,16 +463,16 @@ export default function Index() {
               json.address.town ||
               json.address.village ||
               json.address.county)) ||
-          `${selectedCoord.latitude.toFixed(5)}, ${selectedCoord.longitude.toFixed(5)}`;
+          `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         setSelectedLocationName(name);
       } catch (e) {
         if (!mounted) return;
-        setSelectedLocationName(`${selectedCoord.latitude.toFixed(5)}, ${selectedCoord.longitude.toFixed(5)}`);
+        setSelectedLocationName(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
       } finally {
         if (mounted) setLocationFetching(false);
       }
     }
-    fetchName();
+    fetchName(coord.latitude, coord.longitude);
     return () => {
       mounted = false;
     };
@@ -691,6 +770,39 @@ function generateMapHTML(markers: any[]) {
     <style>
       html,body,#map{height:100%;margin:0;padding:0}
       .leaflet-popup-content img{max-width:100%;height:auto;border-radius:6px;}
+      
+      /* Custom Pin CSS */
+      .pin-wrap {
+        position: relative;
+        width: 50px;
+        height: 60px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .pin-marker {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 3px solid #fff;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        background-position: center;
+        background-size: cover;
+        background-color: #eee;
+        z-index: 2;
+      }
+      .pin-arrow {
+        position: absolute;
+        bottom: 4px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 8px solid transparent;
+        border-right: 8px solid transparent;
+        border-top: 14px solid #fff;
+        z-index: 1;
+      }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -725,7 +837,14 @@ function generateMapHTML(markers: any[]) {
         let content = '';
         if (m.title) content += '<div style="font-weight:700;margin-bottom:6px;">' + (m.title||'') + '</div>';
         if (m.date) content += '<div style="font-size:12px;color:#555;margin-bottom:6px;">' + (new Date(m.date)).toDateString() + '</div>';
-        if (m.uri) content += '<div><img src="'+m.uri+'" style="width:160px;height:90px;object-fit:cover;border-radius:6px"/></div>';
+        
+        let imgUri = m.imageUri || m.uri;
+        if (!imgUri && m.media && m.media.length > 0) {
+             const found = m.media.find(function(x){ return x.type === 'image' || x.type === 'video' });
+             if (found) imgUri = found.uri;
+        }
+
+        if (imgUri) content += '<div><img src="'+imgUri+'" style="width:160px;height:90px;object-fit:cover;border-radius:6px"/></div>';
         if (m.description) content += '<div style="color:#111;margin-top:6px;">' + (m.description||'') + '</div>';
         if (m.note) content += '<div style="color:#111;margin-top:6px;">' + (m.note||'') + '</div>';
         return content;
@@ -735,8 +854,35 @@ function generateMapHTML(markers: any[]) {
         if (!m || !m.id) return;
         // avoid duplicates
         if (permanentMarkers[m.id]) return;
-        const icon = icons[m.type] || icons.note;
-        const marker = L.marker([m.latitude, m.longitude], { icon }).addTo(map);
+
+        let marker;
+        // Determine image
+        let imgUri = m.imageUri || (m.type === 'image' ? m.uri : null);
+        if (!imgUri && m.media && m.media.length > 0) {
+             const found = m.media.find(function(x){ return x.type === 'image' });
+             if (found) imgUri = found.uri;
+        }
+
+        if (imgUri) {
+          const html = \`
+            <div class="pin-wrap">
+              <div class="pin-marker" style="background-image: url('\${imgUri}')"></div>
+              <div class="pin-arrow"></div>
+            </div>
+          \`;
+          const icon = L.divIcon({
+            className: 'custom-div-icon',
+            html: html,
+            iconSize: [50, 60],
+            iconAnchor: [25, 60],
+            popupAnchor: [0, -60]
+          });
+          marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
+        } else {
+          const icon = icons[m.type] || icons.note;
+          marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
+        }
+        
         marker.bindPopup(makePopupContent(m));
         permanentMarkers[m.id] = marker;
       }
