@@ -1,6 +1,6 @@
 import { router } from "expo-router";
-import React, { useMemo, useState } from "react";
-import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { SafeAreaView, ScrollView, StyleSheet } from "react-native";
 import MemoryCard from "../../components/MemoryCard";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -14,118 +14,77 @@ export default function Memories() {
     location?: string;
     date: string;
     imageUri?: string;
-    memoryType?: "photo" | "voice" | "note";
+    type?: "photo" | "voice" | "note" | "video";
+    latitude?: number;
+    longitude?: number;
+    media?: { uri: string; type: string }[];
   };
 
-  const demoMemories: DemoMemory[] = [
+  const SAMPLE_MEMORIES: DemoMemory[] = [
     {
       id: "1",
-      title: "A Day at the Park",
-      subtitle: "Sunny afternoon with friends",
-      location: "Central Park",
-      date: "2024-04-15",
-      imageUri:
-        "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&auto=format&fit=crop&q=60",
-      memoryType: "photo",
+      title: "Sunrise at Ella Rock",
+      subtitle: "A breathtaking view after a long hike up the mountain.",
+      date: "2024-05-20",
+      location: "Ella, Sri Lanka",
+      type: "photo",
+      imageUri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200",
+      latitude: 6.8667,
+      longitude: 81.0467,
+      media: [
+         { uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200", type: "photo" },
+         { uri: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200", type: "photo" },
+         { uri: "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1200", type: "photo" },
+      ]
     },
     {
       id: "2",
-      title: "First Apartment",
-      subtitle: "Moving day excitement",
-      location: "Manhattan",
-      date: "2024-02-09",
-      imageUri:
-        "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&auto=format&fit=crop&q=60",
-      memoryType: "photo",
+      title: "Surfing in Mirissa",
+      subtitle: "Caught some amazing waves this morning!",
+      date: "2024-05-22",
+      location: "Mirissa Beach",
+      type: "video",
+      imageUri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200",
+      latitude: 5.9482,
+      longitude: 80.4716,
+      media: [
+         { uri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", type: "photo" }, // thumb
+         { uri: "https://vjs.zencdn.net/v/oceans.mp4", type: "video" }
+      ]
     },
     {
       id: "3",
-      title: "Beach Vacation",
-      subtitle: "Summer getaway",
-      location: "Malibu",
-      date: "2023-12-22",
-      imageUri:
-        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop&q=60",
-      memoryType: "photo",
+      title: "Galle Fort Walk",
+      subtitle: "Walking through history in the colonial fortress.",
+      date: "2024-05-25",
+      location: "Galle Fort",
+      type: "photo",
+      imageUri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200",
+      latitude: 6.0329,
+      longitude: 80.2168,
+      media: [
+        { uri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200", type: "photo" },
+        { uri: "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200", type: "photo" },
+        { uri: "https://images.unsplash.com/photo-1523490792147-38e4a9e1443b?w=1200", type: "photo" }
+      ]
     },
     {
       id: "4",
-      title: "Dinner with Sam",
-      subtitle: "Amazing Italian restaurant",
-      location: "Brooklyn",
-      date: "2023-11-03",
-      imageUri:
-        "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop&q=60",
-      memoryType: "photo",
+      title: "Notes on Architecture",
+      subtitle: "Observing the Dutch colonial style buildings.",
+      location: "Galle",
+      date: "2024-05-26",
+      type: "note",
+      latitude: 6.0535,
+      longitude: 80.2210,
+      media: []
     },
   ];
 
-  const [sortBy, setSortBy] = useState<"date-desc" | "date-asc" | "title">("date-desc");
-
-  const sortedMemories = useMemo(() => {
-    const sorted = [...demoMemories];
-    if (sortBy === "date-desc") {
-      return sorted.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    } else if (sortBy === "date-asc") {
-      return sorted.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    } else if (sortBy === "title") {
-      return sorted.sort((a, b) => a.title.localeCompare(b.title));
-    }
-    return sorted;
-  }, [sortBy]);
-
-  const handleDelete = (id: string, title: string) => {
-    Alert.alert(
-      "Delete Memory",
-      `Are you sure you want to delete "${title}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive", 
-          onPress: () => console.log("Deleted:", id) 
-        }
-      ]
-    );
-  };
-
-  const SortChip = ({ label, value }: { label: string; value: typeof sortBy }) => {
-    const isActive = sortBy === value;
-    return (
-      <TouchableOpacity
-        onPress={() => setSortBy(value)}
-        style={[
-          styles.chip,
-          {
-            backgroundColor: isActive ? colors.accent : colors.surface,
-            borderColor: isActive ? colors.accent : colors.border,
-            borderWidth: 1,
-          },
-        ]}
-      >
-        <Text
-          style={{
-            color: isActive ? "#fff" : colors.textSecondary,
-            fontSize: 13,
-            fontWeight: isActive ? "700" : "500",
-          }}
-        >
-          {label}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
-      <View style={[styles.headerContainer, { borderBottomColor: colors.border }]}>
-         <SortChip label="Newest" value="date-desc" />
-         <SortChip label="Oldest" value="date-asc" />
-         <SortChip label="A-Z" value="title" />
-      </View>
-
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {sortedMemories.map((m) => (
+        {SAMPLE_MEMORIES.map((m) => (
           <MemoryCard
             key={m.id}
             title={m.title}
@@ -133,12 +92,12 @@ export default function Memories() {
             location={m.location}
             date={m.date}
             imageUri={m.imageUri}
-            memoryType={m.memoryType}
+            memoryType={m.type === "video" ? "photo" : (m.type as any)} // map video to photo or let it pass if supported
             onPress={() => {
               // Pass data so detail view has coords if available
-              router.push({ pathname: `/memory/${m.id}`, params: { data: JSON.stringify(m) } });
+              router.push({ pathname: "/memory/[id]", params: { id: m.id, data: JSON.stringify(m) } });
             }}
-            onDelete={() => handleDelete(m.id, m.title)}
+            onDelete={() => console.log("Deleted:", m.id)}
           />
         ))}
       </ScrollView>
@@ -148,17 +107,5 @@ export default function Memories() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  headerContainer: {
-    flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    borderBottomWidth: 1,
-  },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
   list: { padding: 16, paddingBottom: 24 },
 });

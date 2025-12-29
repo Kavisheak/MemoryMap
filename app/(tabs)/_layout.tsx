@@ -5,7 +5,12 @@ import { Platform, StyleSheet, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 
 export default function TabsLayout() {
-  const { colors } = useTheme();
+  const { theme, colors } = useTheme();
+  const isDark = theme === "dark";
+
+  // ✅ little grey title bar (light mode), slightly deeper grey (dark mode)
+  const headerBg = isDark ? "#111827" : "#f1f5f9";
+
   return (
     <Tabs
       screenOptions={{
@@ -24,10 +29,10 @@ export default function TabsLayout() {
           marginBottom: -12,
         },
         headerStyle: {
-          backgroundColor: colors.cardBackground,
+          backgroundColor: headerBg, // ✅ changed from colors.cardBackground
           borderBottomColor: colors.border,
-          shadowColor: "transparent", 
-          elevation: 0, 
+          shadowColor: "transparent",
+          elevation: 0,
         },
         headerTitleStyle: {
           fontWeight: "800",
