@@ -23,7 +23,18 @@ export default function TabsLayout() {
           fontWeight: "600",
           marginBottom: -12,
         },
-        headerStyle: { backgroundColor: colors.cardBackground, borderBottomColor: colors.border },
+        headerStyle: {
+          backgroundColor: colors.cardBackground,
+          borderBottomColor: colors.border,
+          shadowColor: "transparent", 
+          elevation: 0, 
+        },
+        headerTitleStyle: {
+          fontWeight: "800",
+          fontSize: 18,
+          letterSpacing: 0.5,
+        },
+        headerTitleAlign: "center",
         headerTintColor: colors.textPrimary,
       }}
     >

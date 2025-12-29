@@ -1,10 +1,12 @@
 import React from "react";
-import { ImageBackground, SafeAreaView, ScrollView, StyleSheet } from "react-native";
-import MemoryCard from "../components/MemoryCard";
+import { SafeAreaView, ScrollView, StyleSheet } from "react-native";
+import { router } from "expo-router";
+import MemoryCard from "../../components/MemoryCard";
 import { useTheme } from "../theme/ThemeProvider";
 
 export default function Memories() {
   const { colors } = useTheme();
+
   type DemoMemory = {
     id: string;
     title: string;
@@ -23,7 +25,7 @@ export default function Memories() {
       location: "Central Park",
       date: "2024-04-15",
       imageUri:
-        "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=500&auto=format&fit=crop&q=60",
+        "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=800&auto=format&fit=crop&q=60",
       memoryType: "photo",
     },
     {
@@ -33,7 +35,7 @@ export default function Memories() {
       location: "Manhattan",
       date: "2024-02-09",
       imageUri:
-        "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=500&auto=format&fit=crop&q=60",
+        "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=800&auto=format&fit=crop&q=60",
       memoryType: "photo",
     },
     {
@@ -43,7 +45,7 @@ export default function Memories() {
       location: "Malibu",
       date: "2023-12-22",
       imageUri:
-        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=500&auto=format&fit=crop&q=60",
+        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop&q=60",
       memoryType: "photo",
     },
     {
@@ -53,23 +55,14 @@ export default function Memories() {
       location: "Brooklyn",
       date: "2023-11-03",
       imageUri:
-        "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&auto=format&fit=crop&q=60",
+        "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop&q=60",
       memoryType: "photo",
     },
   ];
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: "transparent" }]}>
-      <ImageBackground
-        source={require("../../assets/images/memory-card-bg.jpg")}
-        style={{ position: "absolute", width: "100%", height: "100%" }}
-        resizeMode="cover"
-      />
-
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         {demoMemories.map((m) => (
           <MemoryCard
             key={m.id}
@@ -79,7 +72,11 @@ export default function Memories() {
             date={m.date}
             imageUri={m.imageUri}
             memoryType={m.memoryType}
-            onPress={() => console.log("Pressed:", m.id)}
+            onPress={() => {
+              // ✅ Only the first memory opens the swipe preview for now
+              if (m.id === "1") router.push(`/memory/${m.id}`);
+              else console.log("Pressed:", m.id);
+            }}
             onDelete={() => console.log("Delete:", m.id)}
           />
         ))}
@@ -89,22 +86,6 @@ export default function Memories() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f8fafc" },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 16,
-    backgroundColor: "#ffffff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-  },
-  h1: {
-    fontSize: 32,
-    fontWeight: "900",
-    color: "#0f172a",
-  },
-  list: {
-    padding: 16,
-    paddingBottom: 24,
-  },
+  safe: { flex: 1 },
+  list: { padding: 16, paddingBottom: 24 },
 });

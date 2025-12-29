@@ -25,33 +25,33 @@ type ThemeContextValue = {
 };
 
 const lightColors: ThemeColors = {
-  background: "#f8fafc",
+  background: "#ffffff",
   cardBackground: "#ffffff",
-  surface: "#f1f5f9",
-  placeholder: "#e2e8f0",
+  surface: "#f8fafc",
+  placeholder: "#cbd5e1",
   textPrimary: "#0f172a",
-  textSecondary: "#64748b",
-  separator: "#cbd5e1",
-  date: "#94a3b8",
-  badgeBg: "rgba(15,23,42,0.8)",
-  deleteBtnBg: "rgba(255,255,255,0.95)",
-  border: "#e2e8f0",
-  accent: "#0ea5e9",
+  textSecondary: "#475569",
+  separator: "#e2e8f0",
+  date: "#64748b",
+  badgeBg: "#1e3a8a", // Dark blue badge
+  deleteBtnBg: "rgba(255,255,255,0.9)",
+  border: "#f1f5f9",
+  accent: "#1e3a8a", // Dark blue accent
 };
 
 const darkColors: ThemeColors = {
-  background: "#071025",
-  cardBackground: "#0b1220",
-  surface: "#072033",
-  placeholder: "#0f172a",
-  textPrimary: "#e6eef8",
+  background: "#020617", // Very dark navy
+  cardBackground: "#0b1120", // Slightly lighter navy
+  surface: "#1e293b",
+  placeholder: "#334155",
+  textPrimary: "#f8fafc",
   textSecondary: "#94a3b8",
-  separator: "#123047",
-  date: "#7aa1bf",
-  badgeBg: "rgba(255,255,255,0.06)",
-  deleteBtnBg: "rgba(255,255,255,0.06)",
-  border: "#123047",
-  accent: "#0284c7",
+  separator: "#1e293b",
+  date: "#64748b",
+  badgeBg: "rgba(255,255,255,0.1)",
+  deleteBtnBg: "rgba(255,255,255,0.1)",
+  border: "#1e293b",
+  accent: "#3b82f6", // Brighter blue for contrast
 };
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
