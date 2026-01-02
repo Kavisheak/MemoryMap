@@ -80,6 +80,9 @@ export default function Index() {
   const [showResults, setShowResults] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Track which memory is being edited
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   let ImagePicker: any = null;
   try {
     // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
@@ -157,12 +160,11 @@ export default function Index() {
   const closeAddMemory = () => {
     setModalVisible(false);
     setSelectedCoord(null);
+    setEditingId(null); // Reset edit state
 
     // reset inputs
     setTitle("");
     setDescription("");
-    setDateISO(new Date().toISOString().slice(0, 10));
-    setNoteText("");
     setDateISO(new Date().toISOString().slice(0, 10));
     setNoteText("");
     setMediaItems([]);
@@ -393,8 +395,11 @@ export default function Index() {
   const saveMemory = () => {
     if (!selectedCoord) return;
 
+    // Use existing ID if editing, otherwise new timestamp ID
+    const newId = editingId ? editingId : String(Date.now());
+
     const m: any = {
-      id: String(Date.now()),
+      id: newId,
       type: mediaItems.find((i) => i.type === "image")
         ? "image"
         : mediaItems.find((i) => i.type === "video")
@@ -416,12 +421,46 @@ export default function Index() {
 
       latitude: selectedCoord.latitude,
       longitude: selectedCoord.longitude,
-      createdAt: Date.now(),
+      // preserve creation time if editing
+      createdAt: editingId ? (memories.find(x=>x.id===editingId)?.createdAt || Date.now()) : Date.now(),
     };
 
-    setMemories((cur) => [m, ...cur]);
-    addPermanentMarkerToWeb(m);
+    if (editingId) {
+      // update local
+      setMemories((cur) => cur.map((x) => (x.id === editingId ? m : x)));
+      // update map: remove old, add new
+      postToWeb({ type: "removeMarker", id: editingId });
+      postToWeb({ type: "addMarker", marker: m });
+    } else {
+      // create new
+      setMemories((cur) => [m, ...cur]);
+      addPermanentMarkerToWeb(m);
+    }
+    
     closeAddMemory();
+  };
+
+  const handleEditMemory = (id: string) => {
+    const mem = memories.find((m) => m.id === id);
+    if (!mem) return;
+
+    // Pre-fill form
+    setTitle(mem.title || "");
+    setDescription(mem.description || "");
+    setDateISO(mem.date || new Date().toISOString().slice(0, 10));
+    setNoteText(mem.note || "");
+    setMediaItems(
+      (mem.media || []).map((x) => ({
+        uri: x.uri,
+        type: x.type === "video" ? "video" : "image",
+      }))
+    );
+    
+    // Set location to memory's location
+    setSelectedCoord({ latitude: mem.latitude, longitude: mem.longitude });
+    setEditingId(id);
+    
+    setModalVisible(true);
   };
 
   useEffect(() => {
@@ -571,6 +610,9 @@ export default function Index() {
             const data = JSON.parse(event.nativeEvent.data);
             if (data?.type === "mapPress") {
               handleMapPress(data.lat, data.lng);
+            }
+            if (data?.type === "editMemory") {
+              handleEditMemory(data.id);
             }
           } catch (e) {}
         }}
@@ -820,6 +862,10 @@ function generateMapHTML(markers: any[]) {
       const permanentMarkers = {};
       let tempMarker = null;
 
+      function editMem(id) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'editMemory', id: id }));
+      }
+
       // make a tiny SVG pin as data URL
       function svgDataUrl(color, w=36, h=54) {
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 24 36"><path d="M12 0C7.03 0 3 4.03 3 9c0 6.6 9 18 9 18s9-11.4 9-18c0-4.97-4.03-9-9-9z" fill="'+color+'"/><circle cx="12" cy="9" r="3.5" fill="#fff"/></svg>';
@@ -847,12 +893,17 @@ function generateMapHTML(markers: any[]) {
         if (imgUri) content += '<div><img src="'+imgUri+'" style="width:160px;height:90px;object-fit:cover;border-radius:6px"/></div>';
         if (m.description) content += '<div style="color:#111;margin-top:6px;">' + (m.description||'') + '</div>';
         if (m.note) content += '<div style="color:#111;margin-top:6px;">' + (m.note||'') + '</div>';
+        
+        // Edit Button using helper
+        content += '<div style="margin-top:12px;text-align:right;border-top:1px solid #eee;padding-top:8px;">';
+        content += '<button onclick="editMem(\\'' + m.id + '\\')" style="background:#2563eb;color:white;border:none;padding:6px 12px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;">Edit Memory</button>';
+        content += '</div>';
+
         return content;
       }
 
       function addPermanent(m) {
         if (!m || !m.id) return;
-        // avoid duplicates
         if (permanentMarkers[m.id]) return;
 
         let marker;
@@ -887,14 +938,11 @@ function generateMapHTML(markers: any[]) {
         permanentMarkers[m.id] = marker;
       }
 
-      // init existing markers
       (markersData || []).forEach(addPermanent);
 
-      // add a temporary visual marker (distinct style)
       function addTemp(m) {
         removeTemp();
         if (!m) return;
-        // use marker with temp icon so it's visually a pin (not a circle)
         tempMarker = L.marker([m.latitude, m.longitude], { icon: icons.temp, zIndexOffset: 2000 }).addTo(map);
       }
 
@@ -905,14 +953,12 @@ function generateMapHTML(markers: any[]) {
         }
       }
 
-      // map click -> notify RN
       map.on('click', function(e) {
         const lat = e.latlng.lat;
         const lng = e.latlng.lng;
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapPress', lat: lat, lng: lng }));
       });
 
-      // handle messages from RN
       function handleIncoming(d) {
         if (!d || !d.type) return;
         if (d.type === 'addMarker' && d.marker) addPermanent(d.marker);

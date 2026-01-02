@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import React from "react";
-import { SafeAreaView, ScrollView, StyleSheet } from "react-native";
+import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 import MemoryCard from "../../components/MemoryCard";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -84,6 +84,24 @@ export default function Memories() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity
+            style={{ 
+              backgroundColor: colors.accent, 
+              padding: 16, 
+              borderRadius: 16, 
+              marginBottom: 20, 
+              alignItems: 'center',
+              shadowColor: colors.accent,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 5
+            }}
+            onPress={() => router.push("/sign-in")}
+        >
+            <Text style={{ color: "white", fontWeight: "bold", fontSize: 16 }}>🔐   Preview Auth Screens</Text>
+        </TouchableOpacity>
+
         {SAMPLE_MEMORIES.map((m) => (
           <MemoryCard
             key={m.id}
