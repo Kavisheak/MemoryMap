@@ -105,6 +105,21 @@ export default function AddMemoryModal({
     setMediaItems(newItems);
   };
 
+  const moveMedia = (idx: number, direction: 'left' | 'right') => {
+    const newItems = [...mediaItems];
+    if (direction === 'left' && idx > 0) {
+      const temp = newItems[idx - 1];
+      newItems[idx - 1] = newItems[idx];
+      newItems[idx] = temp;
+      setMediaItems(newItems);
+    } else if (direction === 'right' && idx < newItems.length - 1) {
+      const temp = newItems[idx + 1];
+      newItems[idx + 1] = newItems[idx];
+      newItems[idx] = temp;
+      setMediaItems(newItems);
+    }
+  };
+
   const Chip = ({
     label,
     active,
@@ -223,6 +238,21 @@ export default function AddMemoryModal({
                         >
                           <Text style={{ color: c.text, fontWeight: "900", fontSize: 12 }}>×</Text>
                         </TouchableOpacity>
+
+                        {/* Reorder Controls */}
+                        <View style={s.reorderRow}>
+                          {idx > 0 && (
+                            <TouchableOpacity onPress={() => moveMedia(idx, 'left')} style={[s.arrowBtn, { backgroundColor: c.surface }]}>
+                              <Text style={{ fontSize: 10, fontWeight: "900", color: c.text }}>←</Text>
+                            </TouchableOpacity>
+                          )}
+                          <View style={{ flex: 1 }} />
+                          {idx < mediaItems.length - 1 && (
+                            <TouchableOpacity onPress={() => moveMedia(idx, 'right')} style={[s.arrowBtn, { backgroundColor: c.surface }]}>
+                              <Text style={{ fontSize: 10, fontWeight: "900", color: c.text }}>→</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       </View>
                     ))}
                   </ScrollView>
@@ -360,6 +390,27 @@ const s = StyleSheet.create({
     height: 26,
     borderRadius: 10,
     borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  reorderRow: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 2,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  arrowBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
