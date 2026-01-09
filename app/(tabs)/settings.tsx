@@ -13,6 +13,8 @@ import {
     View
 } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { router } from "expo-router";
+import { signOutUser } from "../../src/services/auth.service";
 
 export default function Settings() {
   const { theme, toggleTheme, colors } = useTheme();
@@ -51,22 +53,21 @@ export default function Settings() {
 
   // -- Logout Handler --
   const handleLogout = () => {
-    Alert.alert(
-      "Log Out",
-      "Are you sure you want to log out? This will clear your session (demo).",
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Log Out", 
-          style: "destructive", 
-          onPress: () => {
-             // Simulate logout
-             Alert.alert("Logged Out", "You have been logged out successfully.");
-             // Here you would typically clear auth tokens or reset navigation
-          } 
-        }
-      ]
-    );
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOutUser();
+            router.replace("/sign-in");
+          } catch (e: any) {
+            Alert.alert("Logout failed", e?.message ?? "Unknown error");
+          }
+        },
+      },
+    ]);
   };
 
   const SectionHeader = ({ title }: { title: string }) => (
