@@ -2,28 +2,102 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 import React from "react";
 import {
-    Dimensions,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import { signInEmail, signInWithGoogleIdToken } from "../src/services/auth.service";
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get("window");
 
 export default function SignInScreen() {
   const router = useRouter();
 
-  const handleSignIn = () => {
-    // Navigate to tabs
-    router.replace("/(tabs)");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    // ✅ Expo Go uses expoClientId
+    expoClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+
+    // ✅ Keep webClientId too (safe)
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+
+    // ✅ Android: use your env (you currently set it equal to web for now)
+    androidClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ??
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+
+    // ✅ basic scopes only
+    scopes: ["openid", "profile", "email"],
+
+    // keep your current approach
+    responseType: "id_token",
+  });
+
+  React.useEffect(() => {
+    (async () => {
+      if (response?.type !== "success") return;
+
+      const idToken =
+        (response as any)?.authentication?.idToken ??
+        (response as any)?.params?.id_token ??
+        null;
+
+      if (!idToken) {
+        Alert.alert("Google Sign-In failed", "No idToken returned.");
+        return;
+      }
+
+      try {
+        await signInWithGoogleIdToken(idToken);
+        router.replace("/"); // ✅ changed
+      } catch (e: any) {
+        Alert.alert("Google Sign-In failed", e?.message ?? "Unknown error");
+      }
+    })();
+  }, [response, router]);
+
+  const handleSignIn = async () => {
+    try {
+      if (!email.trim() || !password) {
+        Alert.alert("Missing info", "Enter email and password.");
+        return;
+      }
+      await signInEmail(email, password);
+      router.replace("/"); // ✅ changed
+    } catch (e: any) {
+      Alert.alert("Sign in failed", e?.message ?? "Unknown error");
+    }
+  };
+
+  const handleGoogle = async () => {
+    if (!process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID) {
+      Alert.alert("Missing config", "Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in .env");
+      return;
+    }
+    try {
+      // ✅ useProxy goes here (NOT in useAuthRequest 2nd arg)
+      await promptAsync({ useProxy: true });
+    } catch (e: any) {
+      Alert.alert("Google Sign-In failed", e?.message ?? "Unknown error");
+    }
   };
 
   return (
@@ -62,6 +136,8 @@ export default function SignInScreen() {
                 <View style={styles.inputContainer}>
                     <Ionicons name="mail-outline" size={20} color="#94a3b8" />
                     <TextInput
+                        value={email}
+                        onChangeText={setEmail}
                         placeholder="you@example.com"
                         placeholderTextColor="#64748b"
                         style={styles.input}
@@ -77,6 +153,8 @@ export default function SignInScreen() {
                 <View style={styles.inputContainer}>
                     <Ionicons name="lock-closed-outline" size={20} color="#94a3b8" />
                     <TextInput
+                        value={password}
+                        onChangeText={setPassword}
                         placeholder="••••••••"
                         placeholderTextColor="#64748b"
                         style={styles.input}
@@ -107,7 +185,12 @@ export default function SignInScreen() {
                 <View style={styles.line} />
             </View>
 
-             <TouchableOpacity style={styles.googleButton} activeOpacity={0.8} onPress={() => alert('Google Sign In Mock')}>
+             <TouchableOpacity
+                style={styles.googleButton}
+                activeOpacity={0.8}
+                onPress={handleGoogle}
+                disabled={!request}
+              >
                 <Image 
                     source={{ uri: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png" }}
                     style={{ width: 20, height: 20, marginRight: 10 }}

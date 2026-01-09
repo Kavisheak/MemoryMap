@@ -2,28 +2,92 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 import React from "react";
 import {
-    Dimensions,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import { signInWithGoogleIdToken, signUpEmail } from "../src/services/auth.service";
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get("window");
 
 export default function SignUpScreen() {
   const router = useRouter();
 
-  const handleSignUp = () => {
-    // Navigate to tabs
-    router.replace("/(tabs)");
+  const [fullName, setFullName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    androidClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ??
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    scopes: ["openid", "profile", "email"],
+    responseType: "id_token",
+  });
+
+  React.useEffect(() => {
+    (async () => {
+      if (response?.type !== "success") return;
+
+      const idToken =
+        (response as any)?.authentication?.idToken ??
+        (response as any)?.params?.id_token ??
+        null;
+
+      if (!idToken) {
+        Alert.alert("Google Sign-Up failed", "No idToken returned.");
+        return;
+      }
+
+      try {
+        await signInWithGoogleIdToken(idToken);
+        router.replace("/"); // ✅ changed
+      } catch (e: any) {
+        Alert.alert("Google Sign-Up failed", e?.message ?? "Unknown error");
+      }
+    })();
+  }, [response, router]);
+
+  const handleSignUp = async () => {
+    try {
+      if (!email.trim() || !password) {
+        Alert.alert("Missing info", "Enter email and password.");
+        return;
+      }
+      await signUpEmail(email, password, fullName);
+      router.replace("/"); // ✅ changed
+    } catch (e: any) {
+      Alert.alert("Sign up failed", e?.message ?? "Unknown error");
+    }
+  };
+
+  const handleGoogle = async () => {
+    if (!process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID) {
+      Alert.alert("Missing config", "Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in .env");
+      return;
+    }
+    try {
+      await promptAsync({ useProxy: true });
+    } catch (e: any) {
+      Alert.alert("Google Sign-Up failed", e?.message ?? "Unknown error");
+    }
   };
 
   return (
@@ -59,6 +123,8 @@ export default function SignUpScreen() {
                 <View style={styles.inputContainer}>
                     <Ionicons name="person-outline" size={20} color="#94a3b8" />
                     <TextInput
+                        value={fullName}
+                        onChangeText={setFullName}
                         placeholder="John Doe"
                         placeholderTextColor="#64748b"
                         style={styles.input}
@@ -72,6 +138,8 @@ export default function SignUpScreen() {
                 <View style={styles.inputContainer}>
                     <Ionicons name="mail-outline" size={20} color="#94a3b8" />
                     <TextInput
+                        value={email}
+                        onChangeText={setEmail}
                         placeholder="you@example.com"
                         placeholderTextColor="#64748b"
                         style={styles.input}
@@ -87,6 +155,8 @@ export default function SignUpScreen() {
                 <View style={styles.inputContainer}>
                     <Ionicons name="lock-closed-outline" size={20} color="#94a3b8" />
                     <TextInput
+                        value={password}
+                        onChangeText={setPassword}
                         placeholder="Create a strong password"
                         placeholderTextColor="#64748b"
                         style={styles.input}
@@ -113,7 +183,7 @@ export default function SignUpScreen() {
                 <View style={styles.line} />
             </View>
 
-             <TouchableOpacity style={styles.googleButton} activeOpacity={0.8} onPress={() => alert('Google Sign Up Mock')}>
+             <TouchableOpacity style={styles.googleButton} activeOpacity={0.8} onPress={handleGoogle} disabled={!request}>
                 <Image 
                     source={{ uri: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/768px-Google_%22G%22_logo.svg.png" }}
                     style={{ width: 20, height: 20, marginRight: 10 }}
