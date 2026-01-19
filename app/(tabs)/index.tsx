@@ -1,22 +1,17 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { router, useLocalSearchParams } from "expo-router"; // Import router and params
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
-import {
-    ActivityIndicator,
-    Button,
-    FlatList,
-    Image,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
-} from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { WebView } from "react-native-webview";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import { onAuthStateChanged } from "firebase/auth";
+import * as FileSystem from "expo-file-system";
+
 import AddMemoryModal from "../../components/AddMemoryModal";
 import { useTheme } from "../theme/ThemeProvider";
+import { auth } from "../../src/firebase/config";
+import { deleteMemoryCloud, listMemoriesCloud, upsertMemoryCloud } from "../../src/services/memories.service";
 
 type MemoryType = "image" | "video" | "note";
 
@@ -46,6 +41,8 @@ type Memory = {
   createdAt: number;
 };
 
+const STORAGE_KEY = "@memories_v1";
+
 export default function Index() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ focusLat?: string; focusLng?: string }>();
@@ -61,7 +58,7 @@ export default function Index() {
   const [videoModalVisible, setVideoModalVisible] = useState(false);
   const [videoUriToPlay, setVideoUriToPlay] = useState<string | null>(null);
 
-  const webviewRef = useRef<any>(null);
+  const webviewRef = useRef<WebView | null>(null);
   const initialSyncRef = useRef(false);
 
   const [title, setTitle] = useState("");
@@ -83,6 +80,7 @@ export default function Index() {
   // Track which memory is being edited
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // lazy require (so app won’t crash if missing)
   let ImagePicker: any = null;
   try {
     // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
@@ -90,37 +88,6 @@ export default function Index() {
   } catch (e) {
     ImagePicker = null;
   }
-
-  let AsyncStorage: any = null;
-  try {
-    // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
-    AsyncStorage = require("@react-native-async-storage/async-storage");
-  } catch (e) {
-    AsyncStorage = null;
-  }
-
-  // Handle focus params
-  useEffect(() => {
-    if (params.focusLat && params.focusLng) {
-      const lat = parseFloat(params.focusLat);
-      const lng = parseFloat(params.focusLng);
-      // delay slightly to allow map to load if cold start
-      setTimeout(() => {
-        panTo(lat, lng, 16);
-      }, 1000);
-    }
-  }, [params.focusLat, params.focusLng]);
-
-  useEffect(() => {
-    async function requestPerms() {
-      if (ImagePicker && ImagePicker.requestMediaLibraryPermissionsAsync) {
-        try {
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
-        } catch (e) {}
-      }
-    }
-    requestPerms();
-  }, []);
 
   const postToWeb = (obj: any) => {
     try {
@@ -152,25 +119,179 @@ export default function Index() {
     setVideoModalVisible(true);
   };
 
+  const persistLocal = async (items: Memory[]) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch (e: any) {
+      console.error("persistLocal failed", e);
+      Alert.alert("Save failed", e?.message ?? "Could not save locally.");
+    }
+  };
+
   const removeMemory = (id: string) => {
-    setMemories((cur) => cur.filter((m) => m.id !== id));
+    setMemories((cur) => {
+      const next = cur.filter((m) => m.id !== id);
+      persistLocal(next);
+      return next;
+    });
+
     postToWeb({ type: "removeMarker", id });
+
+    (async () => {
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        await deleteMemoryCloud(uid, id);
+      } catch (e) {}
+    })();
+  };
+
+  const handleMapPress = (lat: number, lng: number) => {
+    try {
+      const id = `tmp_${Date.now()}`;
+      setSelectedCoord({ latitude: lat, longitude: lng });
+      setShowAddButton(true);
+      addTempMarker(id, lat, lng, "New memory");
+      setShowResults(false);
+    } catch (e) {}
+  };
+
+  const selectSuggestion = (item: any) => {
+    try {
+      const lat = parseFloat(item?.lat);
+      const lng = parseFloat(item?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      panTo(lat, lng, 16);
+      setSelectedCoord({ latitude: lat, longitude: lng });
+      setShowAddButton(true);
+
+      const id = `tmp_${Date.now()}`;
+      addTempMarker(id, lat, lng, "New memory");
+
+      setQuery(item?.display_name ?? "");
+      setShowResults(false);
+      setResults([]);
+    } catch (e) {}
   };
 
   const closeAddMemory = () => {
     setModalVisible(false);
     setSelectedCoord(null);
-    setEditingId(null); // Reset edit state
+    setEditingId(null);
 
-    // reset inputs
     setTitle("");
     setDescription("");
     setDateISO(new Date().toISOString().slice(0, 10));
     setNoteText("");
     setMediaItems([]);
+
+    removeTempMarker(tempMarkerId);
+    setShowAddButton(false);
   };
 
-  // hardcoded samples for demo
+  const saveMemory = () => {
+    if (!selectedCoord) return;
+
+    const newId = editingId ? editingId : String(Date.now());
+    const m: Memory = {
+      id: newId,
+      type: mediaItems.find((i) => i.type === "image")
+        ? "image"
+        : mediaItems.find((i) => i.type === "video")
+        ? "video"
+        : "note",
+      uri: mediaItems[0]?.uri ?? null,
+      imageUri: mediaItems.find((i) => i.type === "image")?.uri ?? null,
+      videoUri: mediaItems.find((i) => i.type === "video")?.uri ?? null,
+      media: mediaItems,
+      note: noteText || undefined,
+      title: title || undefined,
+      description: description || undefined,
+      date: dateISO || undefined,
+      latitude: selectedCoord.latitude,
+      longitude: selectedCoord.longitude,
+      createdAt: editingId ? (memories.find((x) => x.id === editingId)?.createdAt || Date.now()) : Date.now(),
+    };
+
+    if (editingId) {
+      setMemories((cur) => {
+        const next = cur.map((x) => (x.id === editingId ? m : x));
+        persistLocal(next);
+        return next;
+      });
+      postToWeb({ type: "removeMarker", id: editingId });
+      postToWeb({ type: "addMarker", marker: m });
+    } else {
+      setMemories((cur) => {
+        const next = [m, ...cur];
+        persistLocal(next);
+        return next;
+      });
+      addPermanentMarkerToWeb(m);
+    }
+
+    removeTempMarker(tempMarkerId);
+    setShowAddButton(false);
+
+    (async () => {
+      try {
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+          throw new Error("Not signed in. Please sign in to save to Firebase.");
+        }
+        await upsertMemoryCloud(uid, m as any);
+      } catch (e: any) {
+        console.error("Cloud save failed", e);
+        Alert.alert("Cloud sync failed", e?.message ?? "Could not save to Firebase.");
+      }
+    })();
+
+    closeAddMemory();
+  };
+
+  const handleEditMemory = (id: string) => {
+    const mem = memories.find((m) => m.id === id);
+    if (!mem) return;
+
+    setTitle(mem.title || "");
+    setDescription(mem.description || "");
+    setDateISO(mem.date || new Date().toISOString().slice(0, 10));
+    setNoteText(mem.note || "");
+    setMediaItems(
+      (mem.media || []).map((x) => ({
+        uri: x.uri,
+        type: x.type === "video" ? "video" : "image",
+      }))
+    );
+
+    setSelectedCoord({ latitude: mem.latitude, longitude: mem.longitude });
+    setEditingId(id);
+    setModalVisible(true);
+  };
+
+  // ✅ permissions
+  useEffect(() => {
+    async function requestPerms() {
+      if (!ImagePicker?.requestMediaLibraryPermissionsAsync) return;
+      try {
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      } catch (e) {}
+    }
+    requestPerms();
+  }, []);
+
+  // focus params from details screen
+  useEffect(() => {
+    if (params.focusLat && params.focusLng) {
+      const lat = parseFloat(params.focusLat);
+      const lng = parseFloat(params.focusLng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      setTimeout(() => panTo(lat, lng, 16), 700);
+    }
+  }, [params.focusLat, params.focusLng]);
+
+  // demo samples
   const SAMPLE_MEMORIES: Memory[] = [
     {
       id: "1",
@@ -183,10 +304,10 @@ export default function Index() {
       longitude: 81.0467,
       createdAt: Date.now(),
       media: [
-         { uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200", type: "image" },
-         { uri: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200", type: "image" },
-         { uri: "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1200", type: "image" },
-      ]
+        { uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200", type: "image" },
+        { uri: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200", type: "image" },
+        { uri: "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1200", type: "image" },
+      ],
     },
     {
       id: "2",
@@ -195,14 +316,14 @@ export default function Index() {
       date: "2024-05-22",
       type: "video",
       videoUri: "https://vjs.zencdn.net/v/oceans.mp4",
-      imageUri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", // thumb
+      imageUri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200",
       latitude: 5.9482,
       longitude: 80.4716,
       createdAt: Date.now(),
       media: [
-         { uri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", type: "image" },
-         { uri: "https://vjs.zencdn.net/v/oceans.mp4", type: "video" }
-      ]
+        { uri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", type: "image" },
+        { uri: "https://vjs.zencdn.net/v/oceans.mp4", type: "video" },
+      ],
     },
     {
       id: "3",
@@ -217,8 +338,8 @@ export default function Index() {
       media: [
         { uri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200", type: "image" },
         { uri: "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200", type: "image" },
-        { uri: "https://images.unsplash.com/photo-1523490792147-38e4a9e1443b?w=1200", type: "image" }
-      ]
+        { uri: "https://images.unsplash.com/photo-1523490792147-38e4a9e1443b?w=1200", type: "image" },
+      ],
     },
     {
       id: "4",
@@ -228,256 +349,74 @@ export default function Index() {
       type: "note",
       note: "Colonial style notes...",
       latitude: 6.0535,
-      longitude: 80.2210,
+      longitude: 80.221,
       createdAt: Date.now(),
-      media: []
+      media: [],
     },
   ];
 
-  // load saved memories
+  // load local first
   useEffect(() => {
     async function load() {
-      // If we have local storage logic, we can try it. 
-      // For now, let's merge samples so they ALWAYS show for the demo.
       let loaded: Memory[] = [];
-      if (AsyncStorage && AsyncStorage.getItem) {
-        try {
-          const raw = await AsyncStorage.getItem("@memories_v1");
-          if (raw) {
-            loaded = JSON.parse(raw);
-          }
-        } catch (e) {}
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) loaded = JSON.parse(raw);
+      } catch (e: any) {
+        console.error("load local failed", e);
       }
-      
-      // Merge: include samples if not present properly
+
       const combined = [...SAMPLE_MEMORIES];
-      loaded.forEach(m => {
-        // avoid dupe IDs from samples
-        if(!combined.find(x => x.id === m.id)) combined.push(m);
+      loaded.forEach((m) => {
+        if (!combined.find((x) => x.id === m.id)) combined.push(m);
       });
 
       setMemories(combined);
 
       setTimeout(() => {
-        combined.forEach((m) => {
-          try {
-            postToWeb({ type: "addMarker", marker: m });
-          } catch (e) {}
-        });
-        initialSyncRef.current = true;
+        try {
+          combined.forEach((m) => postToWeb({ type: "addMarker", marker: m }));
+          initialSyncRef.current = true;
+        } catch (e) {
+          console.error("initial marker sync failed", e);
+        }
       }, 350);
     }
     load();
   }, []);
 
-  // persist memories
+  // load cloud after auth ready
   useEffect(() => {
-    async function save() {
-      if (!AsyncStorage || !AsyncStorage.setItem) return;
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user?.uid) return;
       try {
-        await AsyncStorage.setItem("@memories_v1", JSON.stringify(memories));
-      } catch (e) {}
-    }
-    save();
-  }, [memories]);
+        const cloud = await listMemoriesCloud(user.uid);
+        setMemories((cur) => {
+          const byId = new Map<string, Memory>();
+          cur.forEach((m) => byId.set(m.id, m));
+          cloud.forEach((m: any) => byId.set(m.id, m));
+          const merged = Array.from(byId.values()).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+          persistLocal(merged);
+          setTimeout(() => {
+            merged.forEach((m) => postToWeb({ type: "addMarker", marker: m }));
+            initialSyncRef.current = true;
+          }, 350);
+          return merged;
+        });
+      } catch (e: any) {
+        console.error("Cloud load failed", e);
 
-  // debounce search
-  useEffect(() => {
-    if (searchTimer.current) {
-      clearTimeout(searchTimer.current);
-      searchTimer.current = null;
-    }
-    if (!query) {
-      setResults([]);
-      setShowResults(false);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    searchTimer.current = setTimeout(async () => {
-      await performSearch(query);
-    }, 450);
-    return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-    };
-  }, [query]);
-
-  const performSearch = async (q: string) => {
-    setSearching(true);
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(q)}&addressdetails=1`;
-      const resp = await fetch(url, {
-        headers: { "User-Agent": "MemoryMap/1.0 (example@local)" },
-      });
-      const json = await resp.json();
-      setResults(Array.isArray(json) ? json : []);
-      setShowResults(true);
-    } catch (e) {
-      setResults([]);
-      setShowResults(false);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const selectSuggestion = (item: any) => {
-    const lat = parseFloat(item.lat);
-    const lon = parseFloat(item.lon);
-
-    panTo(lat, lon, 15);
-
-    const tmpId = `search-temp-${Date.now()}`;
-    setSelectedCoord({ latitude: lat, longitude: lon });
-    addTempMarker(tmpId, lat, lon, item.display_name);
-    setShowAddButton(true);
-
-    setSelectedLocationName(item.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-
-    setShowResults(false);
-    setQuery(item.display_name || `${lat}, ${lon}`);
-  };
-
-  const handleMapPress = (lat: number, lng: number) => {
-    if (tempMarkerId) removeTempMarker(tempMarkerId);
-    const tmpId = `tap-temp-${Date.now()}`;
-    setSelectedCoord({ latitude: lat, longitude: lng });
-    addTempMarker(tmpId, lat, lng, "Selected location");
-    setShowAddButton(true);
-
-    // reset form fields
-    setTitle("");
-    setDescription("");
-    setDateISO(new Date().toISOString().slice(0, 10));
-    setDateISO(new Date().toISOString().slice(0, 10));
-    setMediaItems([]);
-    setNoteText("");
-    setSelectedLocationName(null);
-  };
-
-  const pickImages = async () => {
-    if (!ImagePicker) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
+        // ✅ No spam alerts; just keep local memories working
+        if (!cloudWarnedRef.current && (e?.code === "permission-denied" || /insufficient permissions/i.test(e?.message))) {
+          cloudWarnedRef.current = true;
+        }
+      }
     });
 
-    const canceled = (res as any).canceled ?? (res as any).cancelled ?? false;
-    if (canceled) return;
+    return () => unsub();
+  }, []);
 
-    const assets = (res as any).assets ?? [];
-    const newItems = assets.map((a: any) => ({ uri: a.uri, type: "image" }));
-    if (!newItems.length) return;
-
-    setMediaItems((cur) => [...cur, ...newItems]);
-  };
-
-  const pickVideos = async () => {
-    if (!ImagePicker) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      quality: 1,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-    });
-
-    const canceled = (res as any).canceled ?? (res as any).cancelled ?? false;
-    if (canceled) return;
-
-    const assets = (res as any).assets ?? [];
-    const newItems = assets.map((a: any) => ({ uri: a.uri, type: "video" }));
-    if (!newItems.length) return;
-
-    setMediaItems((cur) => [...cur, ...newItems]);
-  };
-
-  const saveMemory = () => {
-    if (!selectedCoord) return;
-
-    // Use existing ID if editing, otherwise new timestamp ID
-    const newId = editingId ? editingId : String(Date.now());
-
-    const m: any = {
-      id: newId,
-      type: mediaItems.find((i) => i.type === "image")
-        ? "image"
-        : mediaItems.find((i) => i.type === "video")
-        ? "video"
-        : "note",
-
-      // legacy single
-      uri: mediaItems[0]?.uri ?? null,
-      imageUri: mediaItems.find((i) => i.type === "image")?.uri ?? null,
-      videoUri: mediaItems.find((i) => i.type === "video")?.uri ?? null,
-
-      // ✅ store all in 'media'
-      media: mediaItems, // [{uri, type}, ...]
-
-      note: noteText || undefined,
-      title: title || undefined,
-      description: description || undefined,
-      date: dateISO || undefined,
-
-      latitude: selectedCoord.latitude,
-      longitude: selectedCoord.longitude,
-      // preserve creation time if editing
-      createdAt: editingId ? (memories.find(x=>x.id===editingId)?.createdAt || Date.now()) : Date.now(),
-    };
-
-    if (editingId) {
-      // update local
-      setMemories((cur) => cur.map((x) => (x.id === editingId ? m : x)));
-      // update map: remove old, add new
-      postToWeb({ type: "removeMarker", id: editingId });
-      postToWeb({ type: "addMarker", marker: m });
-    } else {
-      // create new
-      setMemories((cur) => [m, ...cur]);
-      addPermanentMarkerToWeb(m);
-    }
-    
-    closeAddMemory();
-  };
-
-  const handleEditMemory = (id: string) => {
-    const mem = memories.find((m) => m.id === id);
-    if (!mem) return;
-
-    // Pre-fill form
-    setTitle(mem.title || "");
-    setDescription(mem.description || "");
-    setDateISO(mem.date || new Date().toISOString().slice(0, 10));
-    setNoteText(mem.note || "");
-    setMediaItems(
-      (mem.media || []).map((x) => ({
-        uri: x.uri,
-        type: x.type === "video" ? "video" : "image",
-      }))
-    );
-    
-    // Set location to memory's location
-    setSelectedCoord({ latitude: mem.latitude, longitude: mem.longitude });
-    setEditingId(id);
-    
-    setModalVisible(true);
-  };
-
-  useEffect(() => {
-    if (!webviewRef.current) return;
-    if (initialSyncRef.current) return;
-    if (!memories || memories.length === 0) return;
-
-    setTimeout(() => {
-      memories.forEach((m) => {
-        try {
-          postToWeb({ type: "addMarker", marker: m });
-        } catch (e) {}
-      });
-      initialSyncRef.current = true;
-    }, 350);
-  }, [memories]);
-
+  // reverse geocode for selected point
   useEffect(() => {
     const coord = selectedCoord;
     if (!coord) {
@@ -485,44 +424,185 @@ export default function Index() {
       setLocationFetching(false);
       return;
     }
+
     let mounted = true;
+
     async function fetchName(lat: number, lon: number) {
       setLocationFetching(true);
       try {
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
-        const resp = await fetch(url, { headers: { "User-Agent": "MemoryMap/1.0 (example@local)" } });
+        const resp = await fetch(url, { headers: { "User-Agent": "MemoryMap/1.0 (local)" } });
         const json = await resp.json();
+
         if (!mounted) return;
-        const name =
-          json?.display_name ||
-          (json?.address &&
-            (json.address.road ||
-              json.address.suburb ||
-              json.address.city ||
-              json.address.town ||
-              json.address.village ||
-              json.address.county)) ||
-          `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-        setSelectedLocationName(name);
+        setSelectedLocationName(json?.display_name ?? null);
       } catch (e) {
         if (!mounted) return;
-        setSelectedLocationName(`${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+        setSelectedLocationName(null);
       } finally {
-        if (mounted) setLocationFetching(false);
+        if (!mounted) return;
+        setLocationFetching(false);
       }
     }
+
     fetchName(coord.latitude, coord.longitude);
+
     return () => {
       mounted = false;
     };
   }, [selectedCoord]);
+
+  // search (Nominatim)
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+
+    const q = query.trim();
+    if (q.length < 3) {
+      setSearching(false);
+      setResults([]);
+      setShowResults(false);
+      return;
+    }
+
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=${encodeURIComponent(q)}`;
+        const resp = await fetch(url, { headers: { "User-Agent": "MemoryMap/1.0 (local)" } });
+        const json = await resp.json();
+        setResults(Array.isArray(json) ? json : []);
+        setShowResults(true);
+      } catch (e) {
+        setResults([]);
+        setShowResults(false);
+      } finally {
+        setSearching(false);
+      }
+    }, 450);
+
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [query]);
+
+  // ✅ Convert Android content:// URIs into file:// URIs in app cache (WebView-friendly)
+  const normalizePickedUri = async (uri: string, fallbackExt: string) => {
+    try {
+      if (!uri) return uri;
+
+      // Remote URLs are fine in WebView already
+      if (/^https?:\/\//i.test(uri)) return uri;
+
+      // iOS usually returns file:// already; keep it
+      if (Platform.OS !== "android") return uri;
+
+      // On Android, content:// often won't load inside WebView <img>/CSS backgrounds
+      if (!uri.startsWith("content://")) return uri;
+
+      const extGuess =
+        (uri.includes(".") ? uri.split(".").pop() : null) ||
+        fallbackExt ||
+        "jpg";
+
+      const to = `${FileSystem.cacheDirectory}picked_${Date.now()}_${Math.random()
+        .toString(16)
+        .slice(2)}.${extGuess}`;
+
+      await FileSystem.copyAsync({ from: uri, to });
+      return to; // file://... in app cache
+    } catch {
+      return uri;
+    }
+  };
+
+  // ✅ Pick multiple photos
+  const pickImages = async () => {
+    if (!ImagePicker?.launchImageLibraryAsync) return;
+
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: 0,
+        quality: 0.9,
+      });
+
+      if (res?.canceled) return;
+
+      const assets = (res as any)?.assets ?? [];
+      if (!assets.length) return;
+
+      const picked = await Promise.all(
+        assets
+          .map((a: any) => a?.uri)
+          .filter(Boolean)
+          .map(async (uri: string) => ({
+            uri: await normalizePickedUri(uri, "jpg"),
+            type: "image" as const,
+          }))
+      );
+
+      if (!picked.length) return;
+      setMediaItems((cur) => [...cur, ...picked]);
+    } catch (e) {}
+  };
+
+  // ✅ Pick multiple videos
+  const pickVideos = async () => {
+    if (!ImagePicker?.launchImageLibraryAsync) return;
+
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsMultipleSelection: true,
+        selectionLimit: 0,
+        quality: 1,
+      });
+
+      if (res?.canceled) return;
+
+      const assets = (res as any)?.assets ?? [];
+      if (!assets.length) return;
+
+      const picked = await Promise.all(
+        assets
+          .map((a: any) => a?.uri)
+          .filter(Boolean)
+          .map(async (uri: string) => ({
+            uri: await normalizePickedUri(uri, "mp4"),
+            type: "video" as const,
+          }))
+      );
+
+      if (!picked.length) return;
+      setMediaItems((cur) => [...cur, ...picked]);
+    } catch (e) {}
+  };
+
+  const onWebMessage = (event: any) => {
+    try {
+      const raw = event?.nativeEvent?.data;
+      if (!raw) return;
+      const msg = JSON.parse(raw);
+
+      if (msg?.type === "mapPress" && typeof msg.lat === "number" && typeof msg.lng === "number") {
+        handleMapPress(msg.lat, msg.lng);
+        return;
+      }
+
+      if (msg?.type === "editMemory" && typeof msg.id === "string") {
+        handleEditMemory(msg.id);
+        return;
+      }
+    } catch (e) {}
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* SEARCH BAR */}
       <View style={[styles.searchWrap, { backgroundColor: "transparent" }]}>
         <TextInput
-          placeholder="Search places or addresses"
+          placeholder={searching ? "Searching..." : "Search places or addresses"}
           placeholderTextColor={colors.textSecondary}
           value={query}
           onChangeText={setQuery}
@@ -531,10 +611,9 @@ export default function Index() {
             { backgroundColor: colors.cardBackground, color: colors.textPrimary, borderColor: colors.border },
           ]}
           onFocus={() => {
-            if (results.length) setShowResults(true);
+            if (results.length > 0) setShowResults(true);
           }}
         />
-        {searching ? <ActivityIndicator style={{ marginLeft: 8 }} /> : null}
       </View>
 
       {showResults && results.length > 0 && (
@@ -543,12 +622,12 @@ export default function Index() {
             data={results}
             keyExtractor={(i) => i.place_id?.toString() ?? Math.random().toString()}
             renderItem={({ item }) => (
-              <TouchableOpacity onPress={() => selectSuggestion(item)} style={styles.resultItem}>
-                <Text numberOfLines={1} style={{ color: colors.textPrimary }}>
-                  {item.display_name}
-                </Text>
-                <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 12 }}>
-                  {item.type} • {item.class}
+              <TouchableOpacity
+                style={[styles.resultItem, { borderBottomColor: colors.border }]}
+                onPress={() => selectSuggestion(item)}
+              >
+                <Text numberOfLines={2} style={{ color: colors.textPrimary, fontWeight: "700", fontSize: 13 }}>
+                  {item?.display_name ?? "Result"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -556,119 +635,88 @@ export default function Index() {
         </View>
       )}
 
-      {/* Floating "➕ Add Memory" button */}
-      {/* Floating "➕ Add Memory" button - Modernized */}
+      {/* Floating Add Memory button */}
       {showAddButton && selectedCoord && (
         <Animated.View
           entering={FadeInDown.springify().damping(15)}
           style={{
             position: "absolute",
             alignSelf: "center",
-            bottom: 100, // slightly higher
+            bottom: 100,
             zIndex: 220,
           }}
         >
           <TouchableOpacity
-            activeOpacity={0.85}
+            activeOpacity={0.9}
+            onPress={() => setModalVisible(true)}
             style={[
               styles.addButton,
               {
-                backgroundColor: colors.accent, // Use accent color (blue)
+                backgroundColor: colors.accent,
                 shadowColor: colors.accent,
-                shadowOffset: { width: 0, height: 8 },
-                shadowOpacity: 0.35,
-                shadowRadius: 16,
-                elevation: 12,
+                borderWidth: 1,
+                borderColor: colors.border,
               },
             ]}
-            onPress={() => {
-              setTitle("");
-              setDescription("");
-              setDateISO(new Date().toISOString().slice(0, 10));
-              setTitle("");
-              setDescription("");
-              setDateISO(new Date().toISOString().slice(0, 10));
-              setMediaItems([]); // Unified
-              setNoteText("");
-              setModalVisible(true);
-            }}
           >
-            <Ionicons name="add-circle" size={24} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={[styles.addButtonText, { color: "#fff" }]}>Add Memory</Text>
+            <Text style={[styles.addButtonText, { color: "#fff" }]}>+ Add Memory</Text>
           </TouchableOpacity>
         </Animated.View>
       )}
 
       <WebView
-        ref={webviewRef}
+        ref={(r) => {
+          webviewRef.current = r;
+        }}
         originWhitelist={["*"]}
         style={styles.map}
         javaScriptEnabled
-        source={{ html: generateMapHTML(memories) }}
-        onMessage={(event) => {
-          try {
-            const data = JSON.parse(event.nativeEvent.data);
-            if (data?.type === "mapPress") {
-              handleMapPress(data.lat, data.lng);
-            }
-            if (data?.type === "editMemory") {
-              handleEditMemory(data.id);
-            }
-          } catch (e) {}
-        }}
+
+        // ✅ allow local file access (needed for file:// images on markers/popup)
+        allowFileAccess
+        allowFileAccessFromFileURLs
+        allowUniversalAccessFromFileURLs
+        mixedContentMode="always"
+
+        source={{ html: generateMapHTML(memories), baseUrl: "file:///" }}
+        onMessage={onWebMessage}
       />
 
+      {/* Simple bottom list (tap = open edit) */}
       <View style={styles.bottomList} pointerEvents="box-none">
         <FlatList
           data={memories}
           keyExtractor={(i) => i.id}
           horizontal
           showsHorizontalScrollIndicator={false}
-          renderItem={({ item }) => {
-            const thumbUri = item.imageUri ?? (item.type === "image" ? item.uri : null);
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => handleEditMemory(item.id)}
+              style={[
+                styles.memCard,
+                { backgroundColor: colors.cardBackground, borderColor: colors.border, shadowColor: colors.textPrimary },
+              ]}
+            >
+              <View style={styles.memInfo}>
+                <Text numberOfLines={1} style={{ color: colors.textPrimary, fontWeight: "800" }}>
+                  {item.title ?? "Untitled"}
+                </Text>
+                <Text numberOfLines={1} style={{ color: colors.textSecondary, marginTop: 4, fontSize: 12 }}>
+                  {item.description ?? item.note ?? "No details"}
+                </Text>
 
-            return (
-              <TouchableOpacity
-                onPress={() => {
-                  // Pass serialized data to detail view
-                  router.push({
-                    pathname: "/memory/[id]",
-                    params: { id: item.id, data: JSON.stringify(item) },
-                  });
-                }}
-                activeOpacity={0.9}
-              >
-                <View style={[styles.memCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-                  {thumbUri ? (
-                    <Image source={{ uri: thumbUri }} style={styles.memThumb} />
-                  ) : (
-                    <View style={styles.memThumbPlaceholder}>
-                      <Text style={{ color: colors.textSecondary }}>{item.type.toUpperCase()}</Text>
-                    </View>
-                  )}
-
-                  <View style={styles.memInfo}>
-                    <Text numberOfLines={1} style={{ color: colors.textPrimary, fontWeight: "700" }}>
-                      {item.title ?? "Memory"}
-                    </Text>
-                    {item.date ? (
-                      <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                        {new Date(item.date).toDateString()}
-                      </Text>
-                    ) : null}
-                    {item.description ? (
-                      <Text numberOfLines={1} style={{ color: colors.textSecondary }}>
-                        {item.description}
-                      </Text>
-                    ) : null}
-                    <TouchableOpacity onPress={() => removeMemory(item.id)} style={styles.deleteBtnSmall}>
-                      <Text style={{ color: "#ef4444" }}>Delete</Text>
-                    </TouchableOpacity>
-                  </View>
+                <View style={{ flexDirection: "row", marginTop: 10 }}>
+                  <TouchableOpacity
+                    onPress={() => removeMemory(item.id)}
+                    style={[styles.deleteBtnSmall, { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10 }]}
+                  >
+                    <Text style={{ color: colors.textSecondary, fontWeight: "800", fontSize: 12 }}>Delete</Text>
+                  </TouchableOpacity>
                 </View>
-              </TouchableOpacity>
-            );
-          }}
+              </View>
+            </TouchableOpacity>
+          )}
         />
       </View>
 
@@ -695,41 +743,17 @@ export default function Index() {
         onClose={closeAddMemory}
       />
 
-      {/* Video Modal */}
+      {/* Video Modal (if you later use openVideo) */}
       <Modal visible={videoModalVisible} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
           <View style={[styles.videoModal, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-            {(() => {
-              try {
-                // eslint-disable-next-line global-require, @typescript-eslint/no-var-requires
-                const { Video } = require("expo-av");
-                return (
-                  // @ts-ignore
-                  <Video
-                    source={{ uri: videoUriToPlay || undefined }}
-                    useNativeControls
-                    resizeMode="contain"
-                    style={{ width: "100%", height: 300 }}
-                  />
-                );
-              } catch (e) {
-                return (
-                  <View style={{ padding: 16 }}>
-                    <Text style={{ color: colors.textPrimary }}>Install `expo-av` to play videos in-app.</Text>
-                  </View>
-                );
-              }
-            })()}
-
-            <View style={{ marginTop: 12 }}>
-              <Button
-                title="Close"
-                onPress={() => {
-                  setVideoModalVisible(false);
-                  setVideoUriToPlay(null);
-                }}
-              />
-            </View>
+            <Text style={{ color: colors.textPrimary, fontWeight: "800" }}>Video</Text>
+            <Text style={{ color: colors.textSecondary, marginTop: 8 }} numberOfLines={2}>
+              {videoUriToPlay ?? ""}
+            </Text>
+            <TouchableOpacity onPress={() => setVideoModalVisible(false)} style={{ marginTop: 14 }}>
+              <Text style={{ color: colors.accent, fontWeight: "800" }}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -745,10 +769,16 @@ const styles = StyleSheet.create({
   videoModal: { width: "92%", borderRadius: 12, padding: 16, borderWidth: 1, alignItems: "center" },
 
   bottomList: { position: "absolute", bottom: 18, left: 0, right: 0, paddingHorizontal: 12 },
-  memCard: { width: 240, marginRight: 12, borderRadius: 12, overflow: "hidden", borderWidth: 1, flexDirection: "row", alignItems: "center" },
-  memThumb: { width: 80, height: 80 },
-  memThumbPlaceholder: { width: 80, height: 80, justifyContent: "center", alignItems: "center" },
-  memInfo: { flex: 1, padding: 8 },
+  memCard: {
+    width: 240,
+    marginRight: 12,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  memInfo: { flex: 1, padding: 10 },
   deleteBtnSmall: { marginTop: 8 },
 
   searchWrap: {
@@ -783,7 +813,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
   },
 
   addButton: {
@@ -791,18 +820,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 14,
-    borderRadius: 999, // Pill shape
-    // removed absolute positioning here as it's handled by wrapper now for centering
+    borderRadius: 999,
   },
   addButtonText: {
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 16,
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
   },
 });
 
 function generateMapHTML(markers: any[]) {
-  // markers: array of Memory
   const markersJson = JSON.stringify(markers || []);
   return `
   <!doctype html>
@@ -812,39 +839,9 @@ function generateMapHTML(markers: any[]) {
     <style>
       html,body,#map{height:100%;margin:0;padding:0}
       .leaflet-popup-content img{max-width:100%;height:auto;border-radius:6px;}
-      
-      /* Custom Pin CSS */
-      .pin-wrap {
-        position: relative;
-        width: 50px;
-        height: 60px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
-      .pin-marker {
-        width: 44px;
-        height: 44px;
-        border-radius: 50%;
-        border: 3px solid #fff;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-        background-position: center;
-        background-size: cover;
-        background-color: #eee;
-        z-index: 2;
-      }
-      .pin-arrow {
-        position: absolute;
-        bottom: 4px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 0;
-        height: 0;
-        border-left: 8px solid transparent;
-        border-right: 8px solid transparent;
-        border-top: 14px solid #fff;
-        z-index: 1;
-      }
+      .pin-wrap { position: relative; width: 50px; height: 60px; display: flex; justify-content: center; align-items: center; }
+      .pin-marker { width: 44px; height: 44px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.3); background-position: center; background-size: cover; background-color: #eee; z-index: 2; }
+      .pin-arrow { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 14px solid #fff; z-index: 1; }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -853,20 +850,22 @@ function generateMapHTML(markers: any[]) {
     <div id="map"></div>
     <script>
       const markersData = ${markersJson};
-      // Default center set to Sri Lanka (approx. center)
       const map = L.map('map', { zoomControl: false }).setView([7.8731, 80.7718], 7);
       L.control.zoom({ position: 'bottomleft' }).addTo(map);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-      // keep references
       const permanentMarkers = {};
       let tempMarker = null;
+
+      function esc(u) {
+        // escape single quotes for use inside attribute + CSS url('...')
+        return String(u || '').replace(/'/g, "%27");
+      }
 
       function editMem(id) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'editMemory', id: id }));
       }
 
-      // make a tiny SVG pin as data URL
       function svgDataUrl(color, w=36, h=54) {
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 24 36"><path d="M12 0C7.03 0 3 4.03 3 9c0 6.6 9 18 9 18s9-11.4 9-18c0-4.97-4.03-9-9-9z" fill="'+color+'"/><circle cx="12" cy="9" r="3.5" fill="#fff"/></svg>';
         return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
@@ -883,18 +882,18 @@ function generateMapHTML(markers: any[]) {
         let content = '';
         if (m.title) content += '<div style="font-weight:700;margin-bottom:6px;">' + (m.title||'') + '</div>';
         if (m.date) content += '<div style="font-size:12px;color:#555;margin-bottom:6px;">' + (new Date(m.date)).toDateString() + '</div>';
-        
+
+        // Prefer an image for preview (videos won't render as <img>)
         let imgUri = m.imageUri || m.uri;
         if (!imgUri && m.media && m.media.length > 0) {
-             const found = m.media.find(function(x){ return x.type === 'image' || x.type === 'video' });
-             if (found) imgUri = found.uri;
+          const found = m.media.find(function(x){ return x.type === 'image' });
+          if (found) imgUri = found.uri;
         }
 
-        if (imgUri) content += '<div><img src="'+imgUri+'" style="width:160px;height:90px;object-fit:cover;border-radius:6px"/></div>';
+        if (imgUri) content += '<div><img src="'+esc(imgUri)+'" style="width:160px;height:90px;object-fit:cover;border-radius:6px"/></div>';
         if (m.description) content += '<div style="color:#111;margin-top:6px;">' + (m.description||'') + '</div>';
         if (m.note) content += '<div style="color:#111;margin-top:6px;">' + (m.note||'') + '</div>';
-        
-        // Edit Button using helper
+
         content += '<div style="margin-top:12px;text-align:right;border-top:1px solid #eee;padding-top:8px;">';
         content += '<button onclick="editMem(\\'' + m.id + '\\')" style="background:#2563eb;color:white;border:none;padding:6px 12px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer;">Edit Memory</button>';
         content += '</div>';
@@ -907,33 +906,26 @@ function generateMapHTML(markers: any[]) {
         if (permanentMarkers[m.id]) return;
 
         let marker;
-        // Determine image
+
         let imgUri = m.imageUri || (m.type === 'image' ? m.uri : null);
         if (!imgUri && m.media && m.media.length > 0) {
-             const found = m.media.find(function(x){ return x.type === 'image' });
-             if (found) imgUri = found.uri;
+          const found = m.media.find(function(x){ return x.type === 'image' });
+          if (found) imgUri = found.uri;
         }
 
         if (imgUri) {
           const html = \`
             <div class="pin-wrap">
-              <div class="pin-marker" style="background-image: url('\${imgUri}')"></div>
+              <div class="pin-marker" style="background-image: url('\${esc(imgUri)}')"></div>
               <div class="pin-arrow"></div>
-            </div>
-          \`;
-          const icon = L.divIcon({
-            className: 'custom-div-icon',
-            html: html,
-            iconSize: [50, 60],
-            iconAnchor: [25, 60],
-            popupAnchor: [0, -60]
-          });
+            </div>\`;
+          const icon = L.divIcon({ className: 'custom-div-icon', html: html, iconSize: [50, 60], iconAnchor: [25, 60], popupAnchor: [0, -60] });
           marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
         } else {
           const icon = icons[m.type] || icons.note;
           marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
         }
-        
+
         marker.bindPopup(makePopupContent(m));
         permanentMarkers[m.id] = marker;
       }
@@ -954,9 +946,7 @@ function generateMapHTML(markers: any[]) {
       }
 
       map.on('click', function(e) {
-        const lat = e.latlng.lat;
-        const lng = e.latlng.lng;
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapPress', lat: lat, lng: lng }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapPress', lat: e.latlng.lat, lng: e.latlng.lng }));
       });
 
       function handleIncoming(d) {
@@ -971,22 +961,15 @@ function generateMapHTML(markers: any[]) {
           }
         }
         if (d.type === 'panTo' && typeof d.lat === 'number' && typeof d.lng === 'number') {
-          const z = d.zoom || 15;
-          map.setView([d.lat, d.lng], z, { animate: true });
+          map.setView([d.lat, d.lng], d.zoom || 15, { animate: true });
         }
       }
 
       document.addEventListener('message', function(ev) {
-        try {
-          const d = JSON.parse(ev.data);
-          handleIncoming(d);
-        } catch (e) {}
+        try { handleIncoming(JSON.parse(ev.data)); } catch (e) {}
       });
       window.addEventListener('message', function(ev) {
-        try {
-          const d = JSON.parse(ev.data);
-          handleIncoming(d);
-        } catch (e) {}
+        try { handleIncoming(JSON.parse(ev.data)); } catch (e) {}
       });
     </script>
   </body>
