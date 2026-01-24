@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDocs, orderBy, query, setDoc, writeBatch } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 export type MemoryDoc = {
@@ -56,4 +56,16 @@ export async function upsertMemoryCloud(uid: string, memory: MemoryDoc) {
 
 export async function deleteMemoryCloud(uid: string, id: string) {
   await deleteDoc(doc(db, "users", uid, "memories", id));
+}
+
+export async function deleteAllMemoriesCloud(uid: string): Promise<number> {
+  const snap = await getDocs(memoriesCol(uid));
+  if (snap.empty) return 0;
+
+  const batch = writeBatch(db);
+  for (const d of snap.docs) {
+    batch.delete(d.ref);
+  }
+  await batch.commit();
+  return snap.size;
 }

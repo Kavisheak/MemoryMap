@@ -47,6 +47,7 @@ export default function TabsLayout() {
         name="memories"
         options={{
           title: "Memories",
+          
           tabBarLabel: () => null,
           tabBarIcon: ({ color }) => (
             <MaterialIcons name="add-to-photos" size={30} color={color} />
