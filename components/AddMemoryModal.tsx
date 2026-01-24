@@ -1,20 +1,26 @@
-import React, { useEffect, useMemo, useState } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useMemo } from "react";
 import {
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import { useTheme } from "../app/theme/ThemeProvider";
 
 type Props = {
   visible: boolean;
-  colors: any;
+  
+  // Pass color object or use hook inside? 
+  // keeping props for compatibility if parent passes them, 
+  // but better to use hook if not passed or just ignore prop
+  colors?: any; 
 
   selectedCoord: { latitude: number; longitude: number } | null;
   locationFetching: boolean;
@@ -32,7 +38,6 @@ type Props = {
   noteText: string;
   setNoteText: (s: string) => void;
 
-  // ✅ Unified media items
   mediaItems: Array<{ uri: string; type: "image" | "video" }>;
   setMediaItems: (items: Array<{ uri: string; type: "image" | "video" }>) => void;
 
@@ -45,7 +50,6 @@ type Props = {
 
 export default function AddMemoryModal({
   visible,
-  colors,
   selectedCoord,
   locationFetching,
   selectedLocationName,
@@ -64,40 +68,21 @@ export default function AddMemoryModal({
   onSave,
   onClose,
 }: Props) {
+  const { colors } = useTheme(); // Use hook for consistency
+  
+  // Fallback for location text
   const locationLine = selectedCoord
     ? locationFetching
       ? "Fetching location…"
       : selectedLocationName ??
-        `${selectedCoord.latitude.toFixed(5)}, ${selectedCoord.longitude.toFixed(5)}`
+        `${selectedCoord.latitude.toFixed(4)}, ${selectedCoord.longitude.toFixed(4)}`
     : "No location selected";
 
   const canSave = useMemo(() => {
     const hasTitle = !!title.trim();
-    const hasContent = !!noteText.trim() || mediaItems.length > 0;
-    return !!selectedCoord && hasTitle && hasContent;
-  }, [selectedCoord, title, noteText, mediaItems.length]);
-
-  const c = {
-    bg: colors?.cardBackground ?? "#ffffff",
-    surface: colors?.surface ?? colors?.cardBackground ?? "#ffffff",
-    border: colors?.border ?? "#e5e7eb",
-    text: colors?.textPrimary ?? "#0f172a",
-    sub: colors?.textSecondary ?? "#64748b",
-    primary: colors?.primary ?? "#2563eb",
-  };
-
-  const [showNote, setShowNote] = useState(false);
-  const [showImages, setShowImages] = useState(false);
-  const [showVideos, setShowVideos] = useState(false);
-
-  useEffect(() => {
-    if (noteText?.trim()) setShowNote(true);
-    // Auto-expand media section if items exist is implicit in the new design (it's always visible or just a list)
-    // but if we kept "Show" toggles, we need to fix them. 
-    // Actually, in the new styling (Step 135), we added "Unified Media Section". 
-    // Let's just remove the effect if it's not needed, or update it.
-    // Simplifying to just check noteText.
-  }, [noteText]);
+    // Allow saving if just title (and location implied)
+    return !!selectedCoord && hasTitle;
+  }, [selectedCoord, title]);
 
   const removeMediaAt = (idx: number) => {
     const newItems = [...mediaItems];
@@ -105,181 +90,147 @@ export default function AddMemoryModal({
     setMediaItems(newItems);
   };
 
-  const moveMedia = (idx: number, direction: 'left' | 'right') => {
-    const newItems = [...mediaItems];
-    if (direction === 'left' && idx > 0) {
-      const temp = newItems[idx - 1];
-      newItems[idx - 1] = newItems[idx];
-      newItems[idx] = temp;
-      setMediaItems(newItems);
-    } else if (direction === 'right' && idx < newItems.length - 1) {
-      const temp = newItems[idx + 1];
-      newItems[idx + 1] = newItems[idx];
-      newItems[idx] = temp;
-      setMediaItems(newItems);
-    }
-  };
-
-  const Chip = ({
-    label,
-    active,
-    onPress,
-  }: {
-    label: string;
-    active: boolean;
-    onPress: () => void;
-  }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[
-        s.chip,
-        {
-          borderColor: active ? c.primary : c.border,
-          backgroundColor: active ? "rgba(37,99,235,0.10)" : c.surface,
-        },
-      ]}
-    >
-      <Text style={{ color: active ? c.primary : c.text, fontWeight: "900", fontSize: 12 }}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={s.backdrop}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={s.kav}>
-          <View style={[s.sheet, { backgroundColor: c.bg, borderColor: c.border }]}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}
+    >
+      <View style={s.overlay}>
+        <TouchableOpacity style={s.backdropTouch} onPress={onClose} activeOpacity={1} />
+        
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={s.keyboardView}
+        >
+          <View style={[s.sheet, { backgroundColor: colors.cardBackground }]}>
+            {/* Drag Handle Indicator */}
+            <View style={s.handleRow}>
+              <View style={[s.handle, { backgroundColor: colors.border }]} />
+            </View>
+
             {/* Header */}
-            <View style={s.headerRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.h1, { color: c.text }]}>New Memory</Text>
-                <Text numberOfLines={1} style={[s.h2, { color: c.sub }]}>
+            <View style={[s.header, { borderBottomColor: colors.border }]}>
+              <TouchableOpacity onPress={onClose} hitSlop={10}>
+                <Text style={[s.cancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <Text style={[s.headerTitle, { color: colors.textPrimary }]}>New Memory</Text>
+              
+              <TouchableOpacity 
+                onPress={onSave} 
+                disabled={!canSave} 
+                hitSlop={10}
+              >
+                <Text style={[
+                  s.saveText, 
+                  { color: canSave ? colors.accent : colors.textSecondary, opacity: canSave ? 1 : 0.5 }
+                ]}>
+                  Save
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Content */}
+            <ScrollView 
+              style={s.scroll} 
+              contentContainerStyle={s.scrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Location Badge */}
+              <View style={[s.locationBadge, { backgroundColor: colors.surface }]}>
+                <Ionicons name="location" size={14} color={colors.accent} />
+                <Text numberOfLines={1} style={[s.locationText, { color: colors.textSecondary }]}>
                   {locationLine}
                 </Text>
               </View>
 
-              <TouchableOpacity onPress={onClose} style={[s.iconBtn, { borderColor: c.border }]}>
-                <Text style={[s.iconBtnText, { color: c.text }]}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Body */}
-            <ScrollView
-              style={s.body}
-              contentContainerStyle={s.bodyContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {/* Title / Date */}
-              <View style={s.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.label, { color: c.sub }]}>TITLE</Text>
-                  <TextInput
-                    value={title}
-                    onChangeText={setTitle}
-                    placeholder="Give it a name"
-                    placeholderTextColor={c.sub}
-                    style={[s.input, { backgroundColor: c.surface, borderColor: c.border, color: c.text }]}
-                    returnKeyType="next"
-                  />
-                </View>
-
-                <View style={{ width: 120, marginLeft: 10 }}>
-                  <Text style={[s.label, { color: c.sub }]}>DATE</Text>
-                  <TextInput
-                    value={dateISO}
-                    onChangeText={setDateISO}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={c.sub}
-                    style={[s.input, { backgroundColor: c.surface, borderColor: c.border, color: c.text }]}
-                  />
-                </View>
+              {/* Title Input */}
+              <View style={s.section}>
+                <Text style={[s.label, { color: colors.textSecondary }]}>TITLE</Text>
+                <TextInput
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder="What is this moment?"
+                  placeholderTextColor={colors.placeholder}
+                  style={[s.inputTitle, { color: colors.textPrimary, borderBottomColor: colors.border }]}
+                  autoFocus={false}
+                />
               </View>
 
-              {/* Description */}
-              <Text style={[s.label, { color: c.sub }]}>DESCRIPTION</Text>
-              <TextInput
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Short description..."
-                placeholderTextColor={c.sub}
-                style={[s.input, { backgroundColor: c.surface, borderColor: c.border, color: c.text }]}
-              />
+              {/* Date Input */}
+              <View style={s.section}>
+                <Text style={[s.label, { color: colors.textSecondary }]}>DATE</Text>
+                 <TextInput
+                  value={dateISO}
+                  onChangeText={setDateISO}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.placeholder}
+                  style={[s.input, { color: colors.textPrimary, backgroundColor: colors.surface }]}
+                />
+              </View>
 
-              {/* Description */}
-              {/* Unified Media Section */}
-              <View style={{ marginTop: 24 }}>
-                <View style={[s.sectionHeaderRow, { marginBottom: 12 }]}>
-                  <Text style={[s.label, { color: c.sub, marginTop: 0, marginBottom: 0 }]}>MEDIA ({mediaItems.length})</Text>
-                  <View style={{ flexDirection: "row" }}>
-                    <TouchableOpacity onPress={onPickImage} style={[s.smallBtn, { borderColor: c.border, backgroundColor: c.surface, marginRight: 8 }]}>
-                      <Text style={{ color: c.text, fontWeight: "700", fontSize: 12 }}>+ Photos</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={onPickVideo} style={[s.smallBtn, { borderColor: c.border, backgroundColor: c.surface }]}>
-                      <Text style={{ color: c.text, fontWeight: "700", fontSize: 12 }}>+ Videos</Text>
-                    </TouchableOpacity>
-                  </View>
+              {/* Description Input */}
+              <View style={s.section}>
+                <Text style={[s.label, { color: colors.textSecondary }]}>DETAILS</Text>
+                <TextInput
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Add a description..."
+                  placeholderTextColor={colors.placeholder}
+                  multiline
+                  style={[
+                    s.inputMultiline, 
+                    { color: colors.textPrimary, backgroundColor: colors.surface }
+                  ]}
+                />
+              </View>
+
+              {/* Media Section */}
+              <View style={[s.section, { borderTopWidth: 0.5, borderTopColor: colors.border, paddingTop: 20 }]}>
+                <View style={s.mediaHeader}>
+                   <Text style={[s.label, { color: colors.textSecondary, marginBottom: 0 }]}>PHOTOS & VIDEOS</Text>
+                   <View style={s.mediaActions}>
+                      <TouchableOpacity onPress={onPickImage} style={[s.mediaBtn, { backgroundColor: colors.surface }]}>
+                          <Ionicons name="image-outline" size={18} color={colors.textPrimary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={onPickVideo} style={[s.mediaBtn, { backgroundColor: colors.surface }]}>
+                          <Ionicons name="videocam-outline" size={18} color={colors.textPrimary} />
+                      </TouchableOpacity>
+                   </View>
                 </View>
 
                 {mediaItems.length > 0 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 14 }}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.mediaScroll}>
                     {mediaItems.map((item, idx) => (
-                      <View key={`${item.uri}-${idx}`} style={s.thumbWrap}>
-                        <Image source={{ uri: item.uri }} style={[s.thumb, { backgroundColor: c.surface }]} />
+                      <View key={`${item.uri}-${idx}`} style={s.mediaItem}>
+                        <Image source={{ uri: item.uri }} style={[s.mediaThumb, { backgroundColor: colors.surface }]} />
                         {item.type === "video" && (
                           <View style={s.videoBadge}>
-                            <Text style={{ fontSize: 10 }}>🎥</Text>
+                            <Ionicons name="videocam" size={10} color="#fff" />
                           </View>
                         )}
                         <TouchableOpacity
                           onPress={() => removeMediaAt(idx)}
-                          style={[s.thumbX, { borderColor: c.border, backgroundColor: c.surface }]}
+                          style={[s.removeMediaBtn, { backgroundColor: colors.cardBackground }]}
                         >
-                          <Text style={{ color: c.text, fontWeight: "900", fontSize: 12 }}>×</Text>
+                          <Ionicons name="close" size={12} color={colors.textPrimary} />
                         </TouchableOpacity>
-
-                        {/* Reorder Controls */}
-                        <View style={s.reorderRow}>
-                          {idx > 0 && (
-                            <TouchableOpacity onPress={() => moveMedia(idx, 'left')} style={[s.arrowBtn, { backgroundColor: c.surface }]}>
-                              <Text style={{ fontSize: 10, fontWeight: "900", color: c.text }}>←</Text>
-                            </TouchableOpacity>
-                          )}
-                          <View style={{ flex: 1 }} />
-                          {idx < mediaItems.length - 1 && (
-                            <TouchableOpacity onPress={() => moveMedia(idx, 'right')} style={[s.arrowBtn, { backgroundColor: c.surface }]}>
-                              <Text style={{ fontSize: 10, fontWeight: "900", color: c.text }}>→</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
                       </View>
                     ))}
                   </ScrollView>
                 ) : (
-                  <View style={[s.emptyMediaBox, { borderColor: c.border, backgroundColor: c.surface }]}>
-                    <Text style={{ color: c.sub, fontSize: 13 }}>No photos or videos added yet.</Text>
-                  </View>
+                  <TouchableOpacity onPress={onPickImage} style={[s.emptyMedia, { borderColor: colors.border }]}>
+                     <Ionicons name="images-outline" size={24} color={colors.placeholder} />
+                     <Text style={{ color: colors.placeholder, fontSize: 13, marginTop: 4 }}>Add photos or videos</Text>
+                  </TouchableOpacity>
                 )}
               </View>
 
               <View style={{ height: 100 }} />
             </ScrollView>
-
-            {/* Footer */}
-            <View style={[s.footer, { borderTopColor: c.border, backgroundColor: c.bg }]}>
-              <TouchableOpacity
-                onPress={onSave}
-                disabled={!canSave}
-                style={[s.primaryBtn, { backgroundColor: c.primary, opacity: canSave ? 1 : 0.55 }]}
-              >
-                <Text style={s.primaryBtnText}>Save</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={onClose} style={[s.secondaryBtn, { borderColor: c.border }]}>
-                <Text style={[s.secondaryBtnText, { color: c.text }]}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -288,175 +239,167 @@ export default function AddMemoryModal({
 }
 
 const s = StyleSheet.create({
-  backdrop: {
+  overlay: {
     flex: 1,
-    backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginTop: 56, // your "little down"
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.4)", // Dim backdrop
   },
-  kav: { width: "100%", alignItems: "center" },
-
+  backdropTouch: {
+    flex: 1,
+  },
+  keyboardView: {
+    width: "100%",
+    justifyContent: "flex-end",
+  },
   sheet: {
     width: "100%",
-    maxWidth: 560,
-    maxHeight: "86%",
-    borderRadius: 18,
-    borderWidth: 1,
+    height: "85%", // Tall sheet
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     overflow: "hidden",
-    elevation: 0,
-    shadowColor: "transparent",
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
+    paddingBottom: 20,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
   },
-
-  headerRow: {
+  handleRow: {
+    alignItems: "center",
     paddingTop: 12,
-    paddingBottom: 10,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
+    paddingBottom: 8,
   },
-  h1: { fontSize: 18, fontWeight: "900" },
-  h2: { marginTop: 2, fontSize: 12, lineHeight: 16 },
-
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 10,
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.3,
   },
-  iconBtnText: { fontSize: 16, fontWeight: "900" },
-
-  body: { flexGrow: 0 },
-  bodyContent: { paddingHorizontal: 14, paddingBottom: 10 },
-
-  label: { fontSize: 12, fontWeight: "900", letterSpacing: 0.7, marginTop: 8, marginBottom: 6 },
-  row: { flexDirection: "row", alignItems: "flex-start" },
-
-  input: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-
-  chipsRow: { flexDirection: "row", flexWrap: "wrap" },
-  chip: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, marginRight: 8, marginBottom: 8 },
-
-  textArea: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    minHeight: 72,
-    maxHeight: 120,
-    textAlignVertical: "top",
-  },
-
-  sectionHeaderRow: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 0.5,
   },
-
-  smallBtn: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 74,
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: "700",
   },
-
-  mediaStrip: { paddingVertical: 10 },
-  thumbWrap: { width: 84, height: 84, marginRight: 10 },
-  thumb: { width: 84, height: 84, borderRadius: 16 },
-  thumbX: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    width: 26,
-    height: 26,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
+  cancelText: {
+    fontSize: 16,
+    fontWeight: "500",
   },
-
-  reorderRow: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 28,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 2,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+  saveText: {
+    fontSize: 16,
+    fontWeight: "700",
   },
-  arrowBtn: {
-    width: 24,
-    height: 24,
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 24,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+    opacity: 0.8,
+  },
+  inputTitle: {
+    fontSize: 22,
+    fontWeight: "600",
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+  },
+  input: {
     borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  videoRow: {
-    borderWidth: 1,
-    borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
+    paddingVertical: 12,
+    fontSize: 15,
   },
-  videoX: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
+  inputMultiline: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: "top",
   },
-
+  locationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 100,
+    alignSelf: 'flex-start',
+    marginBottom: 20,
+  },
+  locationText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  mediaHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+  },
+  mediaActions: {
+      flexDirection: 'row',
+  },
+  mediaBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginLeft: 12,
+  },
+  mediaScroll: {
+      marginHorizontal: -4,
+  },
+  mediaItem: {
+      width: 100,
+      height: 100,
+      borderRadius: 12,
+      marginRight: 12,
+      overflow: 'hidden',
+  },
+  mediaThumb: {
+      width: '100%',
+      height: '100%',
+  },
   videoBadge: {
-    position: "absolute",
-    left: 4,
-    bottom: 4,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 2,
-    borderRadius: 4,
+      position: 'absolute',
+      bottom: 4,
+      left: 4,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      padding: 4,
+      borderRadius: 4,
   },
-  emptyMediaBox: {
-    padding: 20,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    alignItems: "center",
+  removeMediaBtn: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
   },
-  footer: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
-    borderTopWidth: 1,
+  emptyMedia: {
+      height: 100,
+      borderWidth: 1,
+      borderRadius: 12,
+      borderStyle: 'dashed',
+      justifyContent: 'center',
+      alignItems: 'center',
   },
-
-  primaryBtn: { width: "100%", paddingVertical: 13, borderRadius: 16, alignItems: "center" },
-  primaryBtnText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
-  secondaryBtn: { width: "100%", paddingVertical: 12, borderRadius: 16, borderWidth: 1, alignItems: "center", marginTop: 8 },
-  secondaryBtnText: { fontWeight: "900", fontSize: 15 },
 });

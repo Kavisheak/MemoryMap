@@ -1,17 +1,16 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
-import { Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { WebView } from "react-native-webview";
-import Animated, { FadeInDown } from "react-native-reanimated";
-import { onAuthStateChanged } from "firebase/auth";
 import * as FileSystem from "expo-file-system";
+import { useLocalSearchParams } from "expo-router";
+import { onAuthStateChanged } from "firebase/auth";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, FlatList, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import { WebView } from "react-native-webview";
 
 import AddMemoryModal from "../../components/AddMemoryModal";
-import { useTheme } from "../theme/ThemeProvider";
 import { auth } from "../../src/firebase/config";
 import { deleteMemoryCloud, listMemoriesCloud, upsertMemoryCloud } from "../../src/services/memories.service";
+import { useTheme } from "../theme/ThemeProvider";
 
 type MemoryType = "image" | "video" | "note";
 
@@ -21,11 +20,9 @@ type Memory = {
 
   uri?: string | null;
 
-  // legacy single
   imageUri?: string | null;
   videoUri?: string | null;
 
-  // ✅ new multi
   imageUris?: string[];
   videoUris?: string[];
 
@@ -38,6 +35,10 @@ type Memory = {
 
   latitude: number;
   longitude: number;
+
+  // ✅ add this
+  locationName?: string | null;
+
   createdAt: number;
 };
 
@@ -60,6 +61,7 @@ export default function Index() {
 
   const webviewRef = useRef<WebView | null>(null);
   const initialSyncRef = useRef(false);
+  const cloudWarnedRef = useRef(false);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -205,12 +207,18 @@ export default function Index() {
       imageUri: mediaItems.find((i) => i.type === "image")?.uri ?? null,
       videoUri: mediaItems.find((i) => i.type === "video")?.uri ?? null,
       media: mediaItems,
+
       note: noteText || undefined,
       title: title || undefined,
       description: description || undefined,
       date: dateISO || undefined,
+
       latitude: selectedCoord.latitude,
       longitude: selectedCoord.longitude,
+
+      // ✅ store the human-readable place name you already fetched
+      locationName: selectedLocationName ?? null,
+
       createdAt: editingId ? (memories.find((x) => x.id === editingId)?.createdAt || Date.now()) : Date.now(),
     };
 
@@ -291,70 +299,6 @@ export default function Index() {
     }
   }, [params.focusLat, params.focusLng]);
 
-  // demo samples
-  const SAMPLE_MEMORIES: Memory[] = [
-    {
-      id: "1",
-      title: "Sunrise at Ella Rock",
-      description: "A breathtaking view after a long hike up the mountain.",
-      date: "2024-05-20",
-      type: "image",
-      imageUri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200",
-      latitude: 6.8667,
-      longitude: 81.0467,
-      createdAt: Date.now(),
-      media: [
-        { uri: "https://images.unsplash.com/photo-1588668214407-6ea9a6d8c272?w=1200", type: "image" },
-        { uri: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200", type: "image" },
-        { uri: "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1200", type: "image" },
-      ],
-    },
-    {
-      id: "2",
-      title: "Surfing in Mirissa",
-      description: "Caught some amazing waves this morning!",
-      date: "2024-05-22",
-      type: "video",
-      videoUri: "https://vjs.zencdn.net/v/oceans.mp4",
-      imageUri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200",
-      latitude: 5.9482,
-      longitude: 80.4716,
-      createdAt: Date.now(),
-      media: [
-        { uri: "https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200", type: "image" },
-        { uri: "https://vjs.zencdn.net/v/oceans.mp4", type: "video" },
-      ],
-    },
-    {
-      id: "3",
-      title: "Galle Fort Walk",
-      description: "Walking through history in the colonial fortress.",
-      date: "2024-05-25",
-      type: "image",
-      imageUri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200",
-      latitude: 6.0329,
-      longitude: 80.2168,
-      createdAt: Date.now(),
-      media: [
-        { uri: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?w=1200", type: "image" },
-        { uri: "https://images.unsplash.com/photo-1548013146-72479768bada?w=1200", type: "image" },
-        { uri: "https://images.unsplash.com/photo-1523490792147-38e4a9e1443b?w=1200", type: "image" },
-      ],
-    },
-    {
-      id: "4",
-      title: "Notes on Architecture",
-      description: "Observing the Dutch colonial style buildings.",
-      date: "2024-05-26",
-      type: "note",
-      note: "Colonial style notes...",
-      latitude: 6.0535,
-      longitude: 80.221,
-      createdAt: Date.now(),
-      media: [],
-    },
-  ];
-
   // load local first
   useEffect(() => {
     async function load() {
@@ -366,16 +310,11 @@ export default function Index() {
         console.error("load local failed", e);
       }
 
-      const combined = [...SAMPLE_MEMORIES];
-      loaded.forEach((m) => {
-        if (!combined.find((x) => x.id === m.id)) combined.push(m);
-      });
-
-      setMemories(combined);
+      setMemories(loaded);
 
       setTimeout(() => {
         try {
-          combined.forEach((m) => postToWeb({ type: "addMarker", marker: m }));
+          loaded.forEach((m) => postToWeb({ type: "addMarker", marker: m }));
           initialSyncRef.current = true;
         } catch (e) {
           console.error("initial marker sync failed", e);
@@ -504,7 +443,7 @@ export default function Index() {
         fallbackExt ||
         "jpg";
 
-      const to = `${FileSystem.cacheDirectory}picked_${Date.now()}_${Math.random()
+      const to = `${FileSystem.Paths.cache.uri}picked_${Date.now()}_${Math.random()
         .toString(16)
         .slice(2)}.${extGuess}`;
 
