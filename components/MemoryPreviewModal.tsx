@@ -84,7 +84,19 @@ export default function MemoryPreviewModal({ visible, onClose, title, location, 
         <Pressable style={s.backdropPress} onPress={close} />
 
         <View style={[s.sheet, { backgroundColor: colors.background, borderColor: colors.border }]}>
-          {/* Top progress */}
+          {/* ✅ Header with a clear Cancel button (always visible) */}
+          <View style={[s.header, { backgroundColor: colors.cardBackground, borderBottomColor: colors.border }]}>
+         
+
+            <Text style={[s.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              {phase === "intro" ? "Preview" : `${idx + 1}/${media?.length ?? 0}`}
+            </Text>
+
+            {/* right spacer to keep title centered */}
+            <View style={{ width: 88 }} />
+          </View>
+
+          {/* Top progress (kept below header) */}
           <View style={s.progressRow}>
             {(media || []).map((_, i) => {
               const done = phase === "media" && i < idx;
@@ -182,6 +194,28 @@ const s = StyleSheet.create({
     borderWidth: 1,
     height: "78%",
   },
+
+  header: {
+    height: 54,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+  },
+  cancelBtn: {
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    width: 88,
+  },
+  cancelText: { fontSize: 13, fontWeight: "900" },
+  headerTitle: { fontSize: 13, fontWeight: "900", opacity: 0.95 },
+
   progressRow: {
     flexDirection: "row",
     gap: 6,
@@ -190,6 +224,7 @@ const s = StyleSheet.create({
     paddingBottom: 8,
   },
   progressSeg: { flex: 1, height: 3, borderRadius: 999 },
+
   closeBtn: { position: "absolute", top: 10, right: 10, zIndex: 5, padding: 8 },
 
   introWrap: { flex: 1, justifyContent: "center", alignItems: "center", padding: 24 },

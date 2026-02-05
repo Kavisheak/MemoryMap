@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import {
     Alert,
     Modal,
+  Pressable,
     ScrollView,
     Share,
     StyleSheet,
@@ -21,6 +22,10 @@ import { auth } from "../../src/firebase/config";
 import { sendPasswordResetEmail, deleteUser } from "firebase/auth";
 import * as FileSystem from "expo-file-system";
 import { deleteAllMemoriesCloud } from "../../src/services/memories.service";
+import ConfirmDialog from "../../components/ConfirmDialog";
+import ExportMemoriesModal, { type ExportStatus } from "../../components/ExportMemoriesModal";
+import * as Clipboard from "expo-clipboard";
+import Toast from "react-native-root-toast";
 
 const STORAGE_KEY = "@memories_v1";
 
@@ -71,6 +76,42 @@ export default function Settings() {
   const [aboutVisible, setAboutVisible] = useState(false);
   const [dataVisible, setDataVisible] = useState(false);
 
+  const [confirm, setConfirm] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    cancelText: string;
+    destructive: boolean;
+    onConfirm?: () => void;
+  }>({
+    visible: false,
+    title: "Confirm",
+    message: "",
+    confirmText: "OK",
+    cancelText: "Cancel",
+    destructive: false,
+  });
+
+  const openConfirm = (opts: {
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  }) => {
+    setConfirm({
+      visible: true,
+      title: opts.title,
+      message: opts.message,
+      confirmText: opts.confirmText ?? "OK",
+      cancelText: opts.cancelText ?? "Cancel",
+      destructive: !!opts.destructive,
+      onConfirm: opts.onConfirm,
+    });
+  };
+
   // -- Storage Info --
   const [storageInfo, setStorageInfo] = useState<{ count: number; size: string } | null>(null);
 
@@ -94,99 +135,136 @@ export default function Settings() {
   };
 
   // -- Export Memories --
-  const handleExportMemories = async () => {
+  const [exportVisible, setExportVisible] = useState(false);
+  const [exportStatus, setExportStatus] = useState<ExportStatus>("idle");
+  const [exportFileUri, setExportFileUri] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const openExportModal = () => {
+    setExportVisible(true);
+    setExportStatus("idle");
+    setExportFileUri(null);
+    setExportError(null);
+  };
+
+  const doExportMemories = async () => {
+    setExportStatus("working");
+    setExportError(null);
+    setExportFileUri(null);
+
     try {
-      setLoading(true);
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        Alert.alert("No Data", "You don't have any memories to export.");
+      const parsed = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(parsed) ? parsed : [];
+      if (list.length === 0) {
+        setExportStatus("error");
+        setExportError("No memories to export.");
         return;
       }
 
-      const data = JSON.parse(raw);
-      const jsonString = JSON.stringify(data, null, 2);
+      const jsonString = JSON.stringify(list, null, 2);
       const timestamp = new Date().toISOString().slice(0, 10);
       const fileName = `memories_${timestamp}.json`;
-      
-      const fileUri = `${FileSystem.Paths.cache.uri}${fileName}`;
-      await FileSystem.writeAsStringAsync(fileUri, jsonString);
 
-      // Try to share the file
-      try {
-        await Share.share({
-          title: "Export Memories",
-          message: `Memories exported on ${timestamp}`,
-          url: fileUri,
-        });
-        Alert.alert("Success", "Memories exported successfully!");
-      } catch {
-        // Fallback: show file location
-        Alert.alert("Export Ready", `Export file saved. You can access it from: ${fileUri}`);
+      const cacheDir = FileSystem.Paths?.cache?.uri;
+      const docDir = FileSystem.Paths?.document?.uri;
+      const dir = cacheDir || docDir;
+      if (!dir) {
+        setExportStatus("error");
+        setExportError("No writable directory available for export.");
+        return;
       }
+
+      const fileUri = `${dir}${fileName}`;
+      await FileSystem.writeAsStringAsync(fileUri, jsonString);
+      setExportFileUri(fileUri);
+      setExportStatus("ready");
     } catch (e: any) {
-      Alert.alert("Export Failed", e?.message ?? "Could not export memories.");
-    } finally {
-      setLoading(false);
+      setExportStatus("error");
+      setExportError(e?.message ?? "Could not export memories.");
+    }
+  };
+
+  const shareExportFile = async () => {
+    if (!exportFileUri) return;
+    try {
+      await Share.share({
+        title: "Export Memories",
+        message: "Memories export",
+        url: exportFileUri,
+      });
+    } catch {
+      // share cancelled or unsupported
+    }
+  };
+
+  const copyExportPath = async () => {
+    if (!exportFileUri) return;
+    try {
+      await Clipboard.setStringAsync(exportFileUri);
+      Toast.show("Path copied", {
+        duration: Toast.durations.SHORT,
+        position: Toast.positions.BOTTOM,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+      });
+    } catch {
+      Alert.alert("Copy failed", "Could not copy the file path.");
     }
   };
 
   // -- Clear Cache --
   const handleClearCache = () => {
-    Alert.alert(
-      "Clear Cache",
-      "This will remove all locally stored memories. Cloud data will remain. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.removeItem(STORAGE_KEY);
-              setStorageInfo({ count: 0, size: "0 MB" });
-              Alert.alert("Success", "Cache cleared successfully.");
-            } catch (e: any) {
-              Alert.alert("Error", e?.message ?? "Could not clear cache.");
-            }
-          },
-        },
-      ]
-    );
+    openConfirm({
+      title: "Clear cache?",
+      message: "This will remove all locally stored memories. Cloud data will remain.",
+      confirmText: "Clear",
+      destructive: true,
+      onConfirm: () => {
+        (async () => {
+          try {
+            setLoading(true);
+            await AsyncStorage.removeItem(STORAGE_KEY);
+            setStorageInfo({ count: 0, size: "0 MB" });
+          } catch (e: any) {
+            Alert.alert("Error", e?.message ?? "Could not clear cache.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      },
+    });
   };
 
   const handleDeleteAllMemories = () => {
-    Alert.alert(
-      "Delete All Memories",
-      "This will permanently delete all memories from this device and your Firebase cloud (if signed in). This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setLoading(true);
+    openConfirm({
+      title: "Delete all memories?",
+      message: "This will permanently delete all memories from this device and from Firebase cloud (if signed in). This cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+      onConfirm: () => {
+        (async () => {
+          try {
+            setLoading(true);
 
-              // Always clear local
-              await AsyncStorage.removeItem(STORAGE_KEY);
-              setStorageInfo({ count: 0, size: "0 MB" });
+            // Always clear local
+            await AsyncStorage.removeItem(STORAGE_KEY);
+            setStorageInfo({ count: 0, size: "0 MB" });
 
-              // Clear cloud (best-effort)
-              const uid = auth.currentUser?.uid;
-              if (uid) {
-                await deleteAllMemoriesCloud(uid);
-              }
-
-              Alert.alert("Success", uid ? "Deleted local + cloud memories." : "Deleted local memories (not signed in).\nCloud was not cleared.");
-            } catch (e: any) {
-              Alert.alert("Error", e?.message ?? "Could not delete memories.");
-            } finally {
-              setLoading(false);
+            // Clear cloud (best-effort)
+            const uid = auth.currentUser?.uid;
+            if (uid) {
+              await deleteAllMemoriesCloud(uid);
             }
-          },
-        },
-      ]
-    );
+          } catch (e: any) {
+            Alert.alert("Error", e?.message ?? "Could not delete memories.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      },
+    });
   };
 
   // -- Password Reset --
@@ -196,27 +274,24 @@ export default function Settings() {
       return;
     }
 
-    Alert.alert(
-      "Reset Password",
-      `Send a password reset link to ${user.email}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send",
-          onPress: async () => {
-            try {
-              setLoading(true);
-              await sendPasswordResetEmail(auth, user.email!);
-              Alert.alert("Success", "Password reset email sent! Check your inbox.");
-            } catch (e: any) {
-              Alert.alert("Error", e?.message ?? "Could not send reset email.");
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ]
-    );
+    openConfirm({
+      title: "Send reset email?",
+      message: `Send a password reset link to ${user.email}?`,
+      confirmText: "Send",
+      destructive: false,
+      onConfirm: () => {
+        (async () => {
+          try {
+            setLoading(true);
+            await sendPasswordResetEmail(auth, user.email!);
+          } catch (e: any) {
+            Alert.alert("Error", e?.message ?? "Could not send reset email.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      },
+    });
   };
 
   // -- Delete Account --
@@ -226,57 +301,57 @@ export default function Settings() {
       return;
     }
 
-    Alert.alert(
-      "Delete Account",
-      "This will permanently delete your account and all cloud data. This action cannot be undone. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setLoading(true);
-              // Note: deleteUser requires recent authentication
-              // In production, you'd want to re-authenticate first
-              await deleteUser(user);
-              await signOutUser();
-              Alert.alert("Account Deleted", "Your account has been permanently deleted.");
-              router.replace("/sign-in");
-            } catch (e: any) {
-              setLoading(false);
-              if (e?.code === "auth/requires-recent-login") {
-                Alert.alert(
-                  "Re-authentication Required",
-                  "Please sign out and sign in again, then try deleting your account."
-                );
-              } else {
-                Alert.alert("Error", e?.message ?? "Could not delete account.");
-              }
+    openConfirm({
+      title: "Delete account?",
+      message: "This will permanently delete your account and all cloud data. This action cannot be undone.",
+      confirmText: "Delete",
+      destructive: true,
+      onConfirm: () => {
+        (async () => {
+          try {
+            setLoading(true);
+            // Note: deleteUser requires recent authentication
+            await deleteUser(user);
+            await signOutUser();
+            router.replace("/sign-in");
+          } catch (e: any) {
+            if (e?.code === "auth/requires-recent-login") {
+              Alert.alert(
+                "Re-authentication Required",
+                "Please sign out and sign in again, then try deleting your account."
+              );
+            } else {
+              Alert.alert("Error", e?.message ?? "Could not delete account.");
             }
-          },
-        },
-      ]
-    );
+          } finally {
+            setLoading(false);
+          }
+        })();
+      },
+    });
   };
 
   // -- Logout Handler --
   const handleLogout = () => {
-    Alert.alert("Log Out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Log Out",
-        style: "destructive",
-        onPress: async () => {
+    openConfirm({
+      title: "Log out?",
+      message: "Are you sure you want to log out?",
+      confirmText: "Log Out",
+      destructive: true,
+      onConfirm: () => {
+        (async () => {
           try {
+            setLoading(true);
             await signOutUser();
             router.replace("/sign-in");
           } catch (e: any) {
             Alert.alert("Logout failed", e?.message ?? "Unknown error");
+          } finally {
+            setLoading(false);
           }
-        },
+        })();
       },
-    ]);
+    });
   };
 
   const SectionHeader = ({ title }: { title: string }) => (
@@ -328,23 +403,67 @@ export default function Settings() {
     title: string; 
     children: React.ReactNode 
   }) => (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
-        <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{title}</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Text style={{ color: colors.accent, fontWeight: "600", fontSize: 16 }}>Done</Text>
-          </TouchableOpacity>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+
+        <View style={[styles.modalSheet, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+          <View style={styles.modalHandleRow}>
+            <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+          </View>
+
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}> 
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              {title}
+            </Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={10}>
+              <Ionicons name="close" size={18} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 28 }}>
+            {children}
+          </ScrollView>
         </View>
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          {children}
-        </ScrollView>
       </View>
     </Modal>
   );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <ConfirmDialog
+        visible={confirm.visible}
+        title={confirm.title}
+        message={confirm.message}
+        cancelText={confirm.cancelText}
+        confirmText={confirm.confirmText}
+        destructive={confirm.destructive}
+        onCancel={() => setConfirm((c) => ({ ...c, visible: false, onConfirm: undefined }))}
+        onConfirm={() => {
+          const fn = confirm.onConfirm;
+          setConfirm((c) => ({ ...c, visible: false, onConfirm: undefined }));
+          fn?.();
+        }}
+      />
+
+      <ExportMemoriesModal
+        visible={exportVisible}
+        infoLine={storageInfo ? `${storageInfo.count} memories • ${storageInfo.size}` : undefined}
+        status={exportStatus}
+        fileUri={exportFileUri}
+        errorMessage={exportError}
+        onClose={() => setExportVisible(false)}
+        onExport={() => {
+          doExportMemories();
+        }}
+        onShare={() => {
+          shareExportFile();
+        }}
+        onCopyPath={() => {
+          copyExportPath();
+        }}
+      />
+
       {loading && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.accent} />
@@ -387,7 +506,7 @@ export default function Settings() {
           <SettingItem 
             icon="cloud-download" 
             label="Export Memories" 
-            onPress={handleExportMemories}
+            onPress={openExportModal}
           />
           <SettingItem 
             icon="trash" 
@@ -602,7 +721,7 @@ export default function Settings() {
 
         <TouchableOpacity
           style={[styles.actionButton, { backgroundColor: colors.accent, marginBottom: 12 }]}
-          onPress={handleExportMemories}
+          onPress={openExportModal}
         >
           <Ionicons name="cloud-download" size={20} color="#fff" style={{ marginRight: 8 }} />
           <Text style={{ color: "#fff", fontWeight: "700" }}>Export Memories</Text>
@@ -738,16 +857,54 @@ const styles = StyleSheet.create({
     marginTop: 30,
     fontSize: 12,
   },
-  modalContainer: { flex: 1 },
-  modalHeader: {
-    padding: 16,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "center",
+
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    overflow: "hidden",
+    maxHeight: "88%",
+  },
+  modalHandleRow: {
+    paddingTop: 10,
+    paddingBottom: 8,
     alignItems: "center",
   },
-  modalTitle: { fontSize: 17, fontWeight: "700" },
-  closeBtn: { position: "absolute", right: 16 },
+  modalHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    opacity: 0.9,
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: 0.2,
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   loadingOverlay: {
     position: "absolute",
     top: 0,

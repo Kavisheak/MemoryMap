@@ -1,11 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, View } from "react-native"; // ✅ add Share
-import * as Clipboard from "expo-clipboard"; // ✅ add
+import { Alert, FlatList, Pressable, SafeAreaView, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import Toast from "react-native-root-toast";
 import { auth } from "../../src/firebase/config";
 import { deleteMemoryCloud } from "../../src/services/memories.service";
 import MemoryCard from "../../components/MemoryCard";
+import ConfirmDialog from "../../components/ConfirmDialog";
+import ShareOptionsModal from "../../components/ShareOptionsModal";
 import { useTheme } from "../theme/ThemeProvider";
 
 export default function Memories() {
@@ -33,12 +36,21 @@ export default function Memories() {
   const STORAGE_KEY = "@memories_v1";
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  const [shareVisible, setShareVisible] = useState(false);
+  const [shareTarget, setShareTarget] = useState<Memory | null>(null);
 
   type SortBy = "newest" | "oldest" | "title" | "location";
   const [sortBy, setSortBy] = useState<SortBy>("newest");
 
-  // ✅ Nominatim reverse geocode (no device location permission needed)
-  const fetchAddress = async (lat: number, lon: number): Promise<string | null> => {
+  const askDeleteMemory = useCallback((id: string) => {
+    setPendingDeleteId(id);
+    setConfirmVisible(true);
+  }, []);
+
+  const fetchAddress = useCallback(async (lat: number, lon: number): Promise<string | null> => {
     try {
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
       const resp = await fetch(url, { headers: { "User-Agent": "MemoryMap/1.0 (local)" } });
@@ -48,7 +60,7 @@ export default function Memories() {
     } catch {
       return null;
     }
-  };
+  }, []);
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
@@ -91,7 +103,29 @@ export default function Memories() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAddress]);
+
+  const performDelete = useCallback(
+    async (id: string) => {
+      try {
+        const next = memories.filter((m) => m.id !== id);
+        setMemories(next);
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch (e: any) {
+        Alert.alert("Delete failed", e?.message ?? "Could not delete locally.");
+        loadMemories();
+        return;
+      }
+
+      try {
+        const uid = auth.currentUser?.uid;
+        if (uid) await deleteMemoryCloud(uid, id);
+      } catch {
+        // keep local delete; cloud can fail silently
+      }
+    },
+    [loadMemories, memories]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -99,75 +133,52 @@ export default function Memories() {
     }, [loadMemories])
   );
 
-  const deleteMemory = useCallback(
-    async (id: string) => {
-      Alert.alert("Delete memory?", "This will remove it from your device (and from cloud if signed in).", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const next = memories.filter((m) => m.id !== id);
-              setMemories(next);
-              await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            } catch (e: any) {
-              Alert.alert("Delete failed", e?.message ?? "Could not delete locally.");
-              loadMemories();
-              return;
-            }
-
-            try {
-              const uid = auth.currentUser?.uid;
-              if (uid) await deleteMemoryCloud(uid, id);
-            } catch {
-              // keep local delete; cloud can fail silently
-            }
-          },
-        },
-      ]);
-    },
-    [loadMemories, memories]
-  );
-
   const buildDeepLink = (memoryId: string) => `memorymap://memory/${memoryId}`;
 
-  const shareMemory = useCallback(async (m: Memory) => {
-    const link = buildDeepLink(m.id);
-    const title = m.title ?? "Memory";
-    const loc = m.locationName?.trim() ? m.locationName.trim() : "Unknown location";
-    const when = m.date ? `\nDate: ${m.date}` : "";
-
-    // Small action menu: Copy link OR open native share sheet
-    Alert.alert("Share memory", "Choose an option:", [
-      {
-        text: "Copy link",
-        onPress: async () => {
-          try {
-            await Clipboard.setStringAsync(link);
-            Alert.alert("Copied", "Link copied to clipboard.");
-          } catch {
-            Alert.alert("Copy failed", "Could not copy the link.");
-          }
-        },
-      },
-      {
-        text: "Share…",
-        onPress: async () => {
-          try {
-            await Share.share({
-              title,
-              message: `${title}\nLocation: ${loc}${when}\n\n${link}`,
-              url: link,
-            });
-          } catch {
-            // user cancelled / share failed
-          }
-        },
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
+  const openShare = useCallback((m: Memory) => {
+    setShareTarget(m);
+    setShareVisible(true);
   }, []);
+
+  const closeShare = useCallback(() => {
+    setShareVisible(false);
+    setShareTarget(null);
+  }, []);
+
+  const copyShareLink = useCallback(async () => {
+    if (!shareTarget) return;
+    const link = buildDeepLink(shareTarget.id);
+    try {
+      await Clipboard.setStringAsync(link);
+      Toast.show("Link copied", {
+        duration: Toast.durations.SHORT,
+        position: Toast.positions.BOTTOM,
+        shadow: true,
+        animation: true,
+        hideOnPress: true,
+      });
+    } catch {
+      Alert.alert("Copy failed", "Could not copy the link.");
+    }
+  }, [shareTarget]);
+
+  const nativeShare = useCallback(async () => {
+    if (!shareTarget) return;
+    const link = buildDeepLink(shareTarget.id);
+    const title = shareTarget.title ?? "Memory";
+    const loc = shareTarget.locationName?.trim() ? shareTarget.locationName.trim() : "Unknown location";
+    const when = shareTarget.date ? `\nDate: ${shareTarget.date}` : "";
+
+    try {
+      await Share.share({
+        title,
+        message: `${title}\nLocation: ${loc}${when}\n\n${link}`,
+        url: link,
+      });
+    } catch {
+      // user cancelled / share failed
+    }
+  }, [shareTarget]);
 
   const displayedMemories = useMemo(() => {
     const list = [...memories];
@@ -212,14 +223,50 @@ export default function Memories() {
         onPress={() => {
           router.push({ pathname: "/memory/[id]", params: { id: m.id, data: JSON.stringify(m) } });
         }}
-        onShare={() => shareMemory(m)} // ✅ add
-        onDelete={() => deleteMemory(m.id)}
+        onShare={() => openShare(m)}
+        onDelete={() => askDeleteMemory(m.id)}
       />
     );
   };
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
+      <ShareOptionsModal
+        visible={shareVisible}
+        title={shareTarget?.title ?? "Memory"}
+        location={shareTarget?.locationName?.trim() ? shareTarget.locationName.trim() : "Unknown location"}
+        dateText={shareTarget?.date}
+        link={shareTarget ? buildDeepLink(shareTarget.id) : ""}
+        onClose={closeShare}
+        onCopyLink={async () => {
+          await copyShareLink();
+          closeShare();
+        }}
+        onShare={async () => {
+          await nativeShare();
+          closeShare();
+        }}
+      />
+
+      <ConfirmDialog
+        visible={confirmVisible}
+        title="Delete memory?"
+        message="This will remove it from your device (and from cloud if signed in)."
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => {
+          setConfirmVisible(false);
+          setPendingDeleteId(null);
+        }}
+        onConfirm={() => {
+          const id = pendingDeleteId;
+          setConfirmVisible(false);
+          setPendingDeleteId(null);
+          if (id) performDelete(id);
+        }}
+      />
+
       <FlatList
         data={displayedMemories}
         keyExtractor={(item) => item.id}
